@@ -1,4 +1,4 @@
-# RANGER — Multi-Node Fall Detection System with Radar + Wearable IMU Fusion
+# RANGER - Multi-Node Fall Detection System with Radar + Wearable IMU Fusion
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Wearable Core: Nordic nRF54L15 | nRF52840](https://img.shields.io/badge/Wearable%20Core-Nordic%20nRF54L15%20%7C%20nRF52840-00A9CE.svg)](#wearable-platform-nordic-nrf54l15)
@@ -11,37 +11,40 @@
 ## TL;DR
 
 - **Two ways to catch a fall**: A wearable IMU on the body detects impact + orientation change, while a separate 24GHz FMCW radar watches from across the room. Both have to agree before triggering an alarm, which kills most false positives.
-- **Nordic BLE wearables**: Built around **nRF52840** and testing on **nRF54L15** (Cortex-M33). BLE means the wearable lasts weeks on a small battery instead of hours on Wi-Fi.
-- **ML runs on the MCU itself**: An Edge Impulse TinyML model runs inference at 50Hz directly on the wearable — classifies falls vs. sitting down vs. walking without needing a server.
-- **Three-check confirmation**: Impact spike (>2.5g) or ML confidence (>85%), then 3 seconds of stillness, then radar cross-check. Only after all three does it trigger.
-- **Camera only powers on during a confirmed fall**: The ESP32-CAM sits behind an optocoupler relay and stays completely off until a real fall closes the gate. Then it snaps a photo and sends it via Telegram.
+- **Nordic BLE wearables**: Built around **nRF52840** and testing on **nRF54L15** (Cortex-M33). BLE means the wearable runs for weeks on a small battery instead of hours on Wi-Fi.
+- **ML runs on the MCU itself**: An Edge Impulse TinyML model runs inference at 50Hz directly on the wearable. It classifies falls vs. sitting down vs. walking without needing a server.
+- **Three-check confirmation**: Impact spike (>2.5g) or ML confidence (>85%), then 3 seconds of stillness, then radar cross-check. Only after all three does it actually trigger.
+- **Camera stays completely off until needed**: The ESP32-CAM sits behind an optocoupler relay. It has no power at all until a confirmed fall closes the gate. Then it wakes, snaps a photo, and pushes it to Telegram.
 
 ---
 
 ## Machine Learning & TinyML Inference Pipeline
 
-The wearable node executes an on-device Edge Impulse machine learning model optimized for Arm Cortex-M DSP instructions.
+The wearable runs an Edge Impulse TinyML model directly on the nRF52840's Cortex-M4F. No server, no cloud, no phone needed. The model was trained on recorded IMU data from real falls, intentional high-g movements (jumping, sitting down hard, running), normal walking, and idle postures.
 
 ```mermaid
 flowchart LR
-    A["6-DoF IMU (50Hz)<br/>[ax, ay, az, gx, gy, gz]"] --> B["Signal Windowing<br/>(2000ms window / 200ms slide)"]
-    B --> C["Feature Extraction<br/>Spectral Analysis (FFT)<br/>RMS Energy & Peak Jerk"]
-    C --> D["Quantized TFLite Neural Network<br/>(Arm Cortex-M DSP Acceleration)"]
-    D --> E["Softmax Output Classes<br/>• Fall<br/>• False Alarm (Sit/Jump)<br/>• Walking<br/>• Idle"]
-    E --> F["Dual-Threshold Gating<br/>Impact > 2.5g OR ML Score > 85%"]
+    A["6-DoF IMU @ 50Hz<br/>[ax, ay, az, gx, gy, gz]"] --> B["Rolling Buffer<br/>(2s window, 200ms slide)"]
+    B --> C["DSP Feature Block<br/>FFT spectral bins<br/>RMS energy, peak jerk"]
+    C --> D["Quantized TFLite Model<br/>(int8, Cortex-M optimized)"]
+    D --> E["Softmax Classes<br/>Fall / False Alarm<br/>Walking / Idle"]
+    E --> F["Threshold Gate<br/>Impact > 2.5g OR score > 85%"]
 ```
 
-### Feature Engineering & Input Processing
-1. **Kinematic Windowing**: High-rate continuous sampling of tri-axial acceleration ($a_x, a_y, a_z$) and angular rate ($g_x, g_y, g_z$) at **50 Hz** in 2.0-second overlapping time windows.
-2. **Frequency & Time-Domain DSP**:
-   - **Total Acceleration Vector**: $\|\vec{a}\| = \sqrt{a_x^2 + a_y^2 + a_z^2}$ to decouple body orientation from impact detection.
-   - **Jerk Rate**: $\frac{d\|\vec{a}\|}{dt}$ to capture the rapid deceleration characteristic of ground impact.
-   - **Spectral Power Density**: Fast Fourier Transform (FFT) frequency bin analysis to isolate chaotic tumble dynamics from periodic gait signatures.
-3. **Classification Classes**:
-   - `Fall`: Uncontrolled descent followed by high-g impact and rapid orientation collapse.
-   - `False Alarm`: High-acceleration intentional activities (jumping, sitting down quickly, running).
-   - `Walking`: Periodic rhythmic gait dynamics.
-   - `Idle`: Static sitting, standing, or gentle posture shifts.
+### How the inference actually works
+
+The wearable samples the MPU6050 at 50Hz (±8g accel, ±500 dps gyro). Every 200ms, it pushes the latest 6 readings into a rolling buffer of `EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE` floats. Once the buffer is full (2 seconds of data), Edge Impulse's DSP block extracts features:
+
+1. **Total acceleration magnitude**: $\|\vec{a}\| = \sqrt{a_x^2 + a_y^2 + a_z^2}$. This decouples impact detection from how the sensor is oriented on the body. During freefall this drops toward 0g, during impact it spikes to 2.5-6g.
+2. **Jerk (rate of acceleration change)**: $J = \frac{d\|\vec{a}\|}{dt}$. A fall has a sharp, asymmetric jerk profile: slow onset (freefall) then violent deceleration (ground hit). Sitting down hard has a more symmetric profile.
+3. **FFT spectral bins**: Walking produces strong periodic peaks around 1-2Hz. A tumble produces broadband chaotic energy across many frequency bins. This is probably the single most useful feature for separating falls from daily activities.
+4. **Angular velocity magnitude**: $\|\vec{\omega}\| = \sqrt{\omega_x^2 + \omega_y^2 + \omega_z^2}$. Real falls tend to produce >120 deg/s of rotation. Sitting down produces almost none.
+
+The classifier outputs four softmax scores (0-100%) for `Fall`, `False Alarm`, `Walking`, and `Idle`. These get packed into an 8-byte BLE characteristic and streamed to the base station.
+
+### Training data collection
+
+The [`tools/EI_DataCollector/`](tools/EI_DataCollector/) sketch turns the wearable into a CSV logger. You strap it on, run `capture.sh`, and record labeled sessions: fall forward, fall backward, fall sideways, sit down fast, jump, walk, stand still. The CSVs go straight into Edge Impulse Studio for training. More diverse training data = fewer false positives in practice.
 
 ---
 
@@ -50,10 +53,10 @@ flowchart LR
 Wi-Fi eats too much power for something you wear all day, so the wearable side runs on **Nordic Semiconductor** BLE chips:
 
 - **nRF52840 (current)**: Cortex-M4F @ 64MHz, 1MB Flash, 256KB RAM, BLE 5.3. This is what the wearable and base station run on right now.
-- **nRF54L15 (testing — see [`NRF54_Test/`](NRF54_Test/))**:
+- **nRF54L15 (testing - see [`NRF54_Test/`](NRF54_Test/))**:
   - Cortex-M33 @ 128MHz with better DSP instructions, so ML inference runs faster at lower power.
   - BLE 5.4 support including direction finding (AoA), which could eventually give room-level positioning.
-  - Sub-microamp sleep current — realistic coin-cell battery life for months.
+  - Sub-microamp sleep current - realistic coin-cell battery life for months.
 
 ---
 
@@ -119,18 +122,150 @@ flowchart TD
 
 ---
 
-## Fall Verification Logic
+## 24GHz FMCW Radar Subsystem
+
+The stationary radar nodes (RD-03D on the FusionNode, HLK-LD1125H on the BathroomNode) operate in the 24.00-24.25 GHz ISM band. They transmit a linear frequency chirp and measure the beat frequency of the reflected return to extract target range, and the Doppler shift to extract target radial velocity.
+
+### How FMCW range detection works
+
+The transmitter sweeps from $f_0$ to $f_0 + B$ over a chirp period $T_c$:
+
+$$f(t) = f_0 + \frac{B}{T_c} \cdot t$$
+
+When the signal bounces off a person and comes back, it arrives delayed by $\tau = 2R/c$. The receiver mixes the returned signal with the current transmit signal, producing a beat frequency $f_b$ proportional to the target's distance:
+
+$$R = \frac{c \cdot T_c \cdot f_b}{2B}$$
+
+With $B = 250\text{ MHz}$ bandwidth, the range resolution is:
+
+$$\Delta R = \frac{c}{2B} = \frac{3 \times 10^8}{2 \times 250 \times 10^6} = 0.60\text{ m}$$
+
+So the radar can distinguish two targets that are at least 60cm apart. Good enough for a room.
+
+### Doppler velocity extraction
+
+If the target is moving toward or away from the antenna, the reflected signal gets frequency-shifted:
+
+$$f_d = \frac{2 v_r f_0}{c}$$
+
+At 24GHz ($\lambda = 1.25\text{ cm}$), a person falling at $v_r = 1.5\text{ m/s}$ produces a Doppler shift of 240Hz. That is easy to detect and very distinctive. Normal walking produces maybe 40-80Hz. Standing still produces nothing.
+
+### RD-03D frame protocol
+
+The RD-03D streams binary frames at 256000 baud over UART. Each frame tracks up to 3 simultaneous targets:
+
+- Header: `0xAA 0xFF 0x03 0x00`
+- 3x 8-byte target blocks (X position, Y position, radial speed, resolution in mm)
+- Footer: `0x55 0xCC`
+
+Positions and speeds use a sign-magnitude encoding where the MSB of the high byte indicates sign (`1` = positive, `0` = negative). The firmware also filters out frozen frames (where the radar keeps repeating identical data) and speed sentinel values (248 and 256 cm/s) that the RD-03D outputs when it has no valid speed reading.
+
+---
+
+## Fall Verification State Machine
+
+The fall detection logic runs on the FusionNode (RP2040). It is deliberately conservative: the whole point is to avoid false alarms while still catching real emergencies.
 
 ```mermaid
-flowchart TD
-    A["IMU Peak Impact > 2.5g<br/>OR Edge Impulse ML Score > 85%"] --> B["3-Second Stillness Window<br/>(|a| - 1.0g < 0.25g for 25 samples)"]
-    B -->|Stillness Confirmed| C["CONFIRMED FALL"]
-    B -->|Movement Detected| D["FALSE ALARM / RESET"]
-    C --> E["Tactical HMI Alarm"]
-    C --> F["Relay Closes ESP-CAM Gate"]
-    C --> G["Telegram Bot Dispatch"]
-    D --> H["Return to Monitor State"]
+stateDiagram-v2
+    [*] --> Monitor : Power On
+
+    state Monitor {
+        [*] --> Streaming
+        Streaming : 50Hz IMU + 10Hz Env + ML scores
+        Streaming : Radar tracking active targets
+    }
+
+    Monitor --> Verifying : ML fall score >= 85%
+    Monitor --> Verifying : Impact > 2.5g
+
+    state Verifying {
+        [*] --> StillnessCheck
+        StillnessCheck : 3s window, checking every IMU packet
+        StillnessCheck : Need 25 consecutive still samples
+        StillnessCheck : Still means abs(totalAccel - 1.0g) < 0.25g
+    }
+
+    Verifying --> Monitor : Person moved (false alarm)
+    Verifying --> Monitor : 3s window expired without enough stillness
+    Verifying --> Confirmed : 25 consecutive still samples reached
+
+    state Confirmed {
+        [*] --> Emergency
+        Emergency : GP16 relay closes, ESP-CAM powers on
+        Emergency : CrowPanel alarm triggers
+        Emergency : Telegram photo dispatch
+    }
+
+    Confirmed --> Monitor : Auto-reset after 10s OR CrowPanel sends 0xEE cancel
 ```
+
+### The three stages in detail
+
+**Stage 1: Trigger.** Either the ML classifier on the wearable reports fall confidence >= 85%, or the raw acceleration vector $\|\vec{a}\|$ exceeds 2.5g. Either one is enough to enter the verification window. There is also a 30-second cooldown (`FALL_COOLDOWN_MS`) after a confirmed fall to prevent re-triggering while the person is being helped up.
+
+**Stage 2: Stillness verification.** Once triggered, the FSM opens a 3-second window and starts counting consecutive IMU samples where the person is not moving. "Not moving" means `abs(totalAccel - 1.0g) < 0.25g`. The counter needs to reach 25 consecutive samples. If the person moves during the window, the counter does not just reset to zero: it decrements by 3 for each moving sample (`stillnessCount = max(0, stillnessCount - 3)`). This hysteresis prevents a single noisy sample from resetting progress, but sustained movement will drain it fast. If the 3-second window expires without reaching 25, the whole thing resets to monitoring.
+
+**Stage 3: Confirmed fall.** If stillness is confirmed, `fallDetected` goes to 2. The relay on GP16 goes HIGH, which closes the optocoupler gate and delivers power to the ESP32-CAM. The CrowPanel gets the updated `fallState=2` on its next I2C read and triggers audio/visual alarms. The ESP-CAM boots, connects to Wi-Fi, takes a photo, and POSTs it to the Telegram Bot API. The relay stays on for 60 seconds, then cuts power again.
+
+---
+
+## Inter-Node Communication
+
+The system uses four different transports depending on what makes sense for each link:
+
+### BLE (Wearable to Base Station)
+
+The wearable runs as a BLE peripheral with three notify characteristics under service UUID `833d1814-...`:
+
+| Characteristic | Rate | Size | Contents |
+|---|---|---|---|
+| IMU (`...2a01`) | 50Hz | 20 bytes | 6x `int16_t` accel+gyro (raw), 3x `int16_t` mag, `uint16_t` sequence |
+| Environmental (`...2a02`) | 10Hz | 15 bytes | `int32_t` pressure (Pa), `uint32_t` IR + Red PPG, `uint8_t` status (battery + SOS), `uint16_t` sequence |
+| ML Result (`...2a04`) | on inference | 8 bytes | 4x class scores, winner index, confidence, flags, sequence |
+
+Accel values are raw register reads from the MPU6050 at ±8g range (divide by 4096 for g-force). Gyro is ±500 dps range (divide by 65.5 for degrees/second).
+
+### UART (Base Station to FusionNode)
+
+The base station decodes BLE packets and re-encodes them as ASCII CSV lines at 115200 baud:
+
+```
+I,<ax>,<ay>,<az>,<gx>,<gy>,<gz>,<seq>
+E,<pressure_pa>,<ir>,<red>,<battery>,<sos>,<seq>
+M,<fall%>,<false_alarm%>,<idle%>,<walk%>,<winner_idx>,<confidence%>,<flags>
+STAT,BASE_LINK_OK
+STAT,W_LOST
+```
+
+CSV over UART is simple, debuggable (you can just hook up a serial monitor), and the RP2040 has no BLE stack to deal with.
+
+### I2C Slave (FusionNode to CrowPanel)
+
+The FusionNode exposes a 24-byte packed struct on I2C address `0x42`. The CrowPanel polls this every loop iteration:
+
+```cpp
+struct TelemetryPacket {     // 24 bytes total
+    uint8_t  magic;          // Always 0xAA
+    int16_t  ax, ay, az;     // Accel (raw, /4096 for g)
+    int16_t  gx, gy, gz;     // Gyro (raw, /65.5 for dps)
+    uint8_t  battery;        // 0-100%
+    uint8_t  sos;            // 0 or 1
+    uint8_t  fallState;      // 0=normal, 1=verifying, 2=confirmed
+    uint8_t  wearLink;       // 0=offline, 1=connected
+    uint8_t  radarPresent;   // 0=clear, 1=target tracked
+    int16_t  radarDist_mm;   // Target distance in mm
+    int16_t  radarSpeed;     // Target velocity in cm/s
+    uint8_t  radarTargets;   // 0-3 active targets
+    uint8_t  checksum;       // XOR of bytes 0..22
+};
+```
+
+The struct is double-buffered so the I2C ISR always reads a consistent snapshot. The CrowPanel can also write `0xEE` to cancel a confirmed fall alarm.
+
+### ESP-NOW (WatchNode, BathroomNode to CrowPanel)
+
+Connectionless broadcast at 10Hz. No pairing, no handshake. The CrowPanel just listens. This is used for secondary nodes that do not need the full BLE-to-UART pipeline.
 
 ---
 
@@ -147,14 +282,14 @@ flowchart TD
 
 ## Directory Structure
 
-- [`docs/`](docs/) — Technical specifications and theoretical foundations:
-  - [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) — System topology, bus specifications, and packet byte maps
-  - [`PHYSICS_THEORY.md`](docs/PHYSICS_THEORY.md) — Kinematics, FMCW radar Doppler equations, and RF link budget
-  - [`PINOUT_GUIDE.md`](docs/PINOUT_GUIDE.md) — Full pinout and wiring tables across all boards
-- [`nodes/`](nodes/) — Source code for active production nodes
-- [`NRF54_Test/`](NRF54_Test/) — Hardware bring-up and I2C probing for the nRF54L15
-- [`legacy_ranger2/`](legacy_ranger2/) — Generation 2 reference code and prototype modules
-- [`tools/`](tools/) — Dataset acquisition scripts and radar visualization tools
+- [`docs/`](docs/) - Technical specifications and theoretical foundations:
+  - [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) - System topology, bus specifications, and packet byte maps
+  - [`PHYSICS_THEORY.md`](docs/PHYSICS_THEORY.md) - Kinematics, FMCW radar Doppler equations, and RF link budget
+  - [`PINOUT_GUIDE.md`](docs/PINOUT_GUIDE.md) - Full pinout and wiring tables across all boards
+- [`nodes/`](nodes/) - Source code for active production nodes
+- [`NRF54_Test/`](NRF54_Test/) - Hardware bring-up and I2C probing for the nRF54L15
+- [`legacy_ranger2/`](legacy_ranger2/) - Generation 2 reference code and prototype modules
+- [`tools/`](tools/) - Dataset acquisition scripts and radar visualization tools
 
 ---
 
@@ -200,4 +335,4 @@ Before flashing network-connected nodes ([`CrowPanel.ino`](nodes/CrowPanel/CrowP
 
 ## License
 
-This project is licensed under the MIT License — see the repository root for details.
+This project is licensed under the MIT License - see the repository root for details.
