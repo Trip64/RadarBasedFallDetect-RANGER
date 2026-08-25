@@ -1,8 +1,8 @@
-# RANGER — Multi-Node Sensor Fusion Fall Detection & Tactical Monitoring System
+# RANGER — Multi-Node Fall Detection System with Radar + Wearable IMU Fusion
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Wearable Core: Nordic nRF54L15 | nRF52840](https://img.shields.io/badge/Wearable%20Core-Nordic%20nRF54L15%20%7C%20nRF52840-00A9CE.svg)](#next-generation-wearable-nordic-nrf54l15-migration)
-[![Sensor Fusion: Raspberry Pi Pico RP2040](https://img.shields.io/badge/Fusion%20Engine-RP2040-C51A4A.svg)](#core-system-nodes)
+[![Wearable Core: Nordic nRF54L15 | nRF52840](https://img.shields.io/badge/Wearable%20Core-Nordic%20nRF54L15%20%7C%20nRF52840-00A9CE.svg)](#wearable-platform-nordic-nrf54l15)
+[![Fusion: Raspberry Pi Pico RP2040](https://img.shields.io/badge/Fusion-RP2040-C51A4A.svg)](#core-system-nodes)
 [![Edge ML: Edge Impulse TinyML](https://img.shields.io/badge/Edge%20ML-Edge%20Impulse%20TinyML-E95420.svg)](#machine-learning--tinyml-inference-pipeline)
 [![Connectivity: BLE 5.4 | 24GHz FMCW](https://img.shields.io/badge/Connectivity-BLE%205.4%20%7C%2024GHz%20FMCW-blue.svg)](#system-architecture)
 
@@ -10,11 +10,11 @@
 
 ## TL;DR
 
-- **Dual-Modality Architecture**: Combines ultra-low-power body-worn kinematics (IMU + on-device Machine Learning) with stationary 24GHz FMCW mmWave radar tracking to eliminate false alarms.
-- **Nordic-Centric Wearable Platform**: Built on **Nordic Semiconductor nRF52840** and next-generation **nRF54L15** (Arm Cortex-M33 @ 128MHz with BLE 5.4), prioritizing sub-milliamp battery consumption, deterministic low-latency transmission, and edge DSP over power-hungry Wi-Fi alternatives.
-- **On-Device Edge ML**: Runs quantized TinyML neural network inference at 50Hz directly on the microcontroller to distinguish actual falls from sports, sudden sitting, or bed drops.
-- **Multi-Stage Physical Verification**: A fall is only confirmed if an impact impulse (>2.5g) or high ML confidence (>85%) is followed by continuous post-impact stillness (3 seconds) and validated against room-level radar Doppler shifts.
-- **Privacy-Preserving Emergency Capture**: The emergency camera node remains completely unpowered behind an optocoupler relay until a confirmed fall closes the gate, immediately dispatching snapshot frames to a Telegram bot.
+- **Two ways to catch a fall**: A wearable IMU on the body detects impact + orientation change, while a separate 24GHz FMCW radar watches from across the room. Both have to agree before triggering an alarm, which kills most false positives.
+- **Nordic BLE wearables**: Built around **nRF52840** and testing on **nRF54L15** (Cortex-M33). BLE means the wearable lasts weeks on a small battery instead of hours on Wi-Fi.
+- **ML runs on the MCU itself**: An Edge Impulse TinyML model runs inference at 50Hz directly on the wearable — classifies falls vs. sitting down vs. walking without needing a server.
+- **Three-check confirmation**: Impact spike (>2.5g) or ML confidence (>85%), then 3 seconds of stillness, then radar cross-check. Only after all three does it trigger.
+- **Camera only powers on during a confirmed fall**: The ESP32-CAM sits behind an optocoupler relay and stays completely off until a real fall closes the gate. Then it snaps a photo and sends it via Telegram.
 
 ---
 
@@ -45,15 +45,15 @@ flowchart LR
 
 ---
 
-## Next-Generation Wearable: Nordic nRF54L15 Migration
+## Wearable Platform: Nordic nRF54L15
 
-While legacy systems often rely on power-hungry Wi-Fi microcontrollers, RANGER centers on **Nordic Semiconductor** for wearable endpoints:
+Wi-Fi eats too much power for something you wear all day, so the wearable side runs on **Nordic Semiconductor** BLE chips:
 
-- **nRF52840 (Active Production)**: Arm Cortex-M4F @ 64MHz, 1MB Flash, 256KB RAM, native Bluetooth 5.3 Low Energy.
-- **nRF54L15 (Next-Gen Target & [`NRF54_Test/`](NRF54_Test/))**:
-  - **Arm Cortex-M33 @ 128MHz** with TrustZone and enhanced DSP instructions for faster TinyML inference at lower energy per inferencing cycle.
-  - **Bluetooth 5.4 Ready**: Support for Periodic Advertising with Responses (PAwR) and Angle of Arrival (AoA) direction finding.
-  - **Ultra-Low Power**: Sub-microamp sleep currents with ultra-fast cold start, enabling months of continuous wear on a small coin-cell or compact LiPo battery.
+- **nRF52840 (current)**: Cortex-M4F @ 64MHz, 1MB Flash, 256KB RAM, BLE 5.3. This is what the wearable and base station run on right now.
+- **nRF54L15 (testing — see [`NRF54_Test/`](NRF54_Test/))**:
+  - Cortex-M33 @ 128MHz with better DSP instructions, so ML inference runs faster at lower power.
+  - BLE 5.4 support including direction finding (AoA), which could eventually give room-level positioning.
+  - Sub-microamp sleep current — realistic coin-cell battery life for months.
 
 ---
 
@@ -61,7 +61,7 @@ While legacy systems often rely on power-hungry Wi-Fi microcontrollers, RANGER c
 
 ```mermaid
 flowchart TD
-    subgraph Wearables ["Ultra-Low-Power Wearables"]
+    subgraph Wearables ["Wearable Nodes"]
         WN["WearableNode<br/>(Seeed XIAO nRF52840 / nRF54L15)<br/>MPU6050/9250 + Edge Impulse ML"]
         WNS3["WatchNode S3<br/>(ESP32-S3 SuperMini)<br/>MPU9250 + Barometer"]
     end
@@ -75,8 +75,8 @@ flowchart TD
         FUSION["FusionNode<br/>(Raspberry Pi Pico RP2040)<br/>RD-03D Radar + Stillness FSM"]
     end
 
-    subgraph Display_Emergency ["Tactical Dashboard & Emergency Node"]
-        CROW["CrowPanel Advance 4.3-inch<br/>(ESP32-S3 HMI Touchscreen)<br/>800x480 Tactical LovyanGFX"]
+    subgraph Display_Emergency ["Dashboard & Emergency Camera"]
+        CROW["CrowPanel Advance 4.3-inch<br/>(ESP32-S3 HMI Touchscreen)<br/>800x480 LovyanGFX Display"]
         CAM["ESPCAM_Telegram<br/>(AI-Thinker ESP32-CAM)<br/>Optoisolated Relay Gated"]
     end
 
@@ -98,7 +98,7 @@ flowchart TD
 | Node | Target Hardware | Primary Sensors / Roles | Transports & Interfaces |
 |---|---|---|---|
 | [**WearableNode**](nodes/WearableNode/) | Seeed XIAO nRF52840 | MPU6050 6-DoF IMU, BMP280, Edge Impulse ML Engine | BLE Peripheral (Notify @ 50Hz) |
-| [**NRF54_Test**](NRF54_Test/) | Seeed XIAO nRF54L15 | Next-Gen Arm Cortex-M33 test platform, I2C scanner & diagnostics | USB-CDC, Fast-Mode I2C (400kHz), BLE 5.4 |
+| [**NRF54_Test**](NRF54_Test/) | Seeed XIAO nRF54L15 | Cortex-M33 bring-up and I2C scanner for testing new hardware | USB-CDC, Fast-Mode I2C (400kHz), BLE 5.4 |
 | [**BaseNode**](nodes/BaseNode/) | Seeed XIAO nRF52840 | Dedicated BLE Central receiver & UART bridge | BLE Central &rarr; UART (115200 baud) |
 | [**FusionNode**](nodes/FusionNode/) | Raspberry Pi Pico (RP2040) | Fall FSM brain, RD-03D 24GHz mmWave radar, relay power gate | UART (256k & 115k), I2C Slave (`0x42`) |
 | [**CrowPanel**](nodes/CrowPanel/) | CrowPanel Advance 4.3" (ESP32-S3) | ST7265 800x480 IPS display, GT911 touch, TCA9534 expander | I2C Master, ESP-NOW, Wi-Fi Station |
@@ -136,12 +136,12 @@ flowchart TD
 
 ## Project Roadmap & TODO
 
-- [ ] **nRF54L15 TinyML Port**: Port full Edge Impulse inference model and CMSIS-NN kernels to the Seeed XIAO nRF54L15 (Arm Cortex-M33).
-- [ ] **BLE 5.4 Direction Finding**: Implement Angle of Arrival (AoA) packet tags for room-level wearable localization.
-- [ ] **Barometric Fall Signatures**: Integrate BMP388 high-precision altitude delta ($\Delta h > 0.8\text{m}$ in $< 500\text{ms}$) into the ML feature vector.
-- [ ] **Dynamic Power Profiling**: Enable IMU threshold wake-up interrupts (`WOM` - Wake On Motion) to keep the Nordic core in sub-microamp System OFF sleep until motion occurs.
-- [ ] **Expanded ML Training Corpus**: Expand Edge Impulse dataset with diverse real-world stumbles, slip-and-fall scenarios, and age-varied kinematics.
-- [ ] **Encrypted BLE Channel**: Implement AES-128 BLE pairing and secure telemetry encapsulation between wearable and base station.
+- [ ] **Port ML model to nRF54L15**: Get Edge Impulse inference and CMSIS-NN kernels running on the Cortex-M33.
+- [ ] **BLE direction finding**: Use AoA to figure out which room the wearable is in.
+- [ ] **Barometric fall detection**: Use BMP388 altitude drops ($\Delta h > 0.8\text{m}$ in $< 500\text{ms}$) as another ML feature.
+- [ ] **Wake-on-motion sleep**: Use IMU `WOM` interrupt so the Nordic chip stays in deep sleep until actual movement happens.
+- [ ] **More training data**: Record more real-world stumbles, slips, and edge cases for Edge Impulse.
+- [ ] **Encrypted BLE**: Add AES-128 pairing between wearable and base station.
 
 ---
 
@@ -152,7 +152,7 @@ flowchart TD
   - [`PHYSICS_THEORY.md`](docs/PHYSICS_THEORY.md) — Kinematics, FMCW radar Doppler equations, and RF link budget
   - [`PINOUT_GUIDE.md`](docs/PINOUT_GUIDE.md) — Full pinout and wiring tables across all boards
 - [`nodes/`](nodes/) — Source code for active production nodes
-- [`NRF54_Test/`](NRF54_Test/) — Hardware verification and I2C probing for next-gen Nordic nRF54L15
+- [`NRF54_Test/`](NRF54_Test/) — Hardware bring-up and I2C probing for the nRF54L15
 - [`legacy_ranger2/`](legacy_ranger2/) — Generation 2 reference code and prototype modules
 - [`tools/`](tools/) — Dataset acquisition scripts and radar visualization tools
 
