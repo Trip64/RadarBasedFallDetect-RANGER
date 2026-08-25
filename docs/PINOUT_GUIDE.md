@@ -7,12 +7,13 @@ This document specifies the complete pin assignments, hardware buses, communicat
 ## Quick Navigation
 
 - [1. WearableNode (Seeed XIAO nRF52840)](#1-wearablenode-seeed-xiao-nrf52840)
-- [2. BaseNode (Seeed XIAO nRF52840)](#2-basenode-seeed-xiao-nrf52840)
-- [3. FusionNode (Raspberry Pi Pico RP2040)](#3-fusionnode-raspberry-pi-pico-rp2040)
-- [4. CrowPanel Advance 4.3" (ESP32-S3)](#4-crowpanel-advance-43-esp32-s3)
-- [5. WatchNode S3 (ESP32-S3 SuperMini)](#5-watchnode-s3-esp32-s3-supermini)
-- [6. BathroomNode (ESP32-S3 SuperMini)](#6-bathroomnode-esp32-s3-supermini)
-- [7. ESPCAM_Telegram (AI-Thinker ESP32-CAM)](#7-espcam_telegram-ai-thinker-esp32-cam)
+- [2. NRF54_Test Next-Gen Wearable (Seeed XIAO nRF54L15)](#2-nrf54_test-next-gen-wearable-seeed-xiao-nrf54l15)
+- [3. BaseNode (Seeed XIAO nRF52840)](#3-basenode-seeed-xiao-nrf52840)
+- [4. FusionNode (Raspberry Pi Pico RP2040)](#4-fusionnode-raspberry-pi-pico-rp2040)
+- [5. CrowPanel Advance 4.3" (ESP32-S3)](#5-crowpanel-advance-43-esp32-s3)
+- [6. WatchNode S3 (ESP32-S3 SuperMini)](#6-watchnode-s3-esp32-s3-supermini)
+- [7. BathroomNode (ESP32-S3 SuperMini)](#7-bathroomnode-esp32-s3-supermini)
+- [8. ESPCAM_Telegram (AI-Thinker ESP32-CAM)](#8-espcam_telegram-ai-thinker-esp32-cam)
 
 ---
 
@@ -31,7 +32,21 @@ Primary wearable node for high-frequency kinematic capture and on-device Edge Im
 
 ---
 
-## 2. BaseNode (Seeed XIAO nRF52840)
+## 2. NRF54_Test Next-Gen Wearable (Seeed XIAO nRF54L15)
+
+Next-generation ultra-low-power wearable target featuring Arm Cortex-M33 @ 128MHz with hardware DSP and Bluetooth 5.4.
+
+| Function | Pin / GPIO | Direction | Protocol / Electrical Spec | Notes |
+|---|---|---|---|---|
+| I2C SDA | `D4` / `SDA` | Bidirectional | I2C Data (400 kHz Fast Mode) | MPU9250 / MPU6050 (0x68), BMP388 / BMP280 (0x76) |
+| I2C SCL | `D5` / `SCL` | Output | I2C Clock (400 kHz Fast Mode) | MPU9250 / MPU6050 (0x68), BMP388 / BMP280 (0x76) |
+| Onboard Status LED | `LED_BUILTIN` | Output | Digital Output | Heartbeat indicator |
+| USB-CDC Serial | Native USB | Bidirectional | High-Speed Serial CDC (115200) | Firmware telemetry and debugging |
+| Power Supply | `3V3` / `GND` / `VBAT` | Power | 1.8V – 3.6V Supply Rail | Sub-microamp sleep capability |
+
+---
+
+## 3. BaseNode (Seeed XIAO nRF52840)
 
 Dedicated BLE Central node acting as a low-latency wireless-to-UART bridge for the wearable.
 
@@ -44,7 +59,7 @@ Dedicated BLE Central node acting as a low-latency wireless-to-UART bridge for t
 
 ---
 
-## 3. FusionNode (Raspberry Pi Pico RP2040)
+## 4. FusionNode (Raspberry Pi Pico RP2040)
 
 Central real-time processor executing the multi-target FMCW radar tracking, fall verification state machine, audio alarms, and optoisolated relay gate.
 
@@ -67,7 +82,7 @@ Central real-time processor executing the multi-target FMCW radar tracking, fall
 
 ---
 
-## 4. CrowPanel Advance 4.3" (ESP32-S3)
+## 5. CrowPanel Advance 4.3" (ESP32-S3)
 
 800x480 high-resolution IPS touch dashboard displaying real-time kinematics, radar point clouds, and Wi-Fi Telegram bot notifications.
 
@@ -83,7 +98,7 @@ Central real-time processor executing the multi-target FMCW radar tracking, fall
 
 ---
 
-## 5. WatchNode S3 (ESP32-S3 SuperMini)
+## 6. WatchNode S3 (ESP32-S3 SuperMini)
 
 Alternative wrist-worn sensor node utilizing ESP-NOW connectionless broadcast with a 9-DoF IMU and barometric altimeter.
 
@@ -98,7 +113,7 @@ Alternative wrist-worn sensor node utilizing ESP-NOW connectionless broadcast wi
 
 ---
 
-## 6. BathroomNode (ESP32-S3 SuperMini)
+## 7. BathroomNode (ESP32-S3 SuperMini)
 
 Dedicated wall-mounted stationary radar node monitoring high-risk private zones (e.g. bathroom, shower) where cameras are prohibited.
 
@@ -112,7 +127,7 @@ Dedicated wall-mounted stationary radar node monitoring high-risk private zones 
 
 ---
 
-## 7. ESPCAM_Telegram (AI-Thinker ESP32-CAM)
+## 8. ESPCAM_Telegram (AI-Thinker ESP32-CAM)
 
 Privacy-first emergency camera node. Remains completely unpowered until energized by the Fusion Node relay upon a confirmed fall event.
 

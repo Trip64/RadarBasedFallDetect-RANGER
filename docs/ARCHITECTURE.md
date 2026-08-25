@@ -8,8 +8,8 @@ This document details the system topology, inter-node communication protocols, p
 
 ```mermaid
 flowchart TD
-    subgraph Wearables ["Wearable Devices"]
-        WN["WearableNode<br/>(Seeed XIAO nRF52840)<br/>MPU6050 + BMP280 + ML"]
+    subgraph Wearables ["Ultra-Low-Power Wearables"]
+        WN["WearableNode<br/>(Seeed XIAO nRF52840 / nRF54L15)<br/>MPU6050/9250 + Edge Impulse ML"]
         WNS3["WatchNode S3<br/>(ESP32-S3 SuperMini)<br/>MPU9250 + Mag + Baro"]
     end
 
