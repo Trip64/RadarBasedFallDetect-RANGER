@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ranger Radar</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; }
+        #bg-video {
+            position: fixed; top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            object-fit: cover; z-index: 0; opacity: 0.5;
+        }
+        canvas {
+            position: fixed; top: 0; left: 0;
+            width: 100vw; height: 100vh; z-index: 1;
+        }
+        .btns {
+            position: fixed; top: 12px; left: 12px; z-index: 10;
+            display: flex; gap: 8px;
+        }
+        .btns button {
+            background: rgba(0,0,0,0.6); color: #0f0;
+            border: 1px solid #0f0; padding: 8px 14px;
+            font: bold 12px monospace; cursor: pointer;
+        }
+        .btns button:hover { background: #0f0; color: #000; }
+    </style>
+</head>
+<body>
+    <video id="bg-video" autoplay playsinline muted></video>
+    <canvas id="c"></canvas>
+    <div class="btns">
+        <button id="btn-serial">CONNECT SERIAL</button>
+        <button id="btn-cam">ENABLE CAM</button>
+    </div>
+
+<script>
+const MAX_DIST = 8000;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let targets = {};
+let imu = { ax: 0, ay: 0, az: 0, gx: 0, gy: 0, gz: 0, mlFall: 0, mlConf: 0, fusion: 0, radar: 0 };
+let wearLink = false;
+let battery = -1;
+let sos = false;
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Camera
+document.getElementById('btn-cam').addEventListener('click', async () => {
+    try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        document.getElementById('bg-video').srcObject = s;
+    } catch(e) { console.error(e); }
+});
+
+// Drawing
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const cx = canvas.width / 2;
+    const cy = canvas.height;
+    const maxR = Math.min(canvas.width / 2, canvas.height) - 30;
+
+    // Grid rings
+    for (let i = 1; i <= 4; i++) {
+        const r = (maxR / 4) * i;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, Math.PI, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(0, 255, 0, 0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Distance labels
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
+        ctx.font = 'bold 13px monospace';
+        ctx.fillText((MAX_DIST / 4 * i / 1000).toFixed(1) + 'm', cx + 6, cy - r + 14);
+    }
+
+    // Radial lines + angle labels
+    for (let a = 0; a <= 180; a += 30) {
+        const rad = (a * Math.PI) / 180;
+        const ex = cx + Math.cos(Math.PI + rad) * maxR;
+        const ey = cy + Math.sin(Math.PI + rad) * maxR;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(ex, ey);
+        ctx.strokeStyle = 'rgba(0, 255, 0, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Angle label at the end of each radial line
+        if (a > 0 && a < 180) {
+            const lx = cx + Math.cos(Math.PI + rad) * (maxR + 16);
+            const ly = cy + Math.sin(Math.PI + rad) * (maxR + 16);
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+            ctx.font = '11px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(a + '°', lx, ly);
+        }
+    }
+    ctx.textAlign = 'left'; // Reset
+
+    // Targets
+    for (const [id, t] of Object.entries(targets)) {
+        if (Date.now() - t.lastSeen > 1500) { delete targets[id]; continue; }
+
+        const px = cx + (t.x / MAX_DIST) * maxR;
+        const py = cy - (t.y / MAX_DIST) * maxR;
+
+        // Glow
+        const grad = ctx.createRadialGradient(px, py, 0, px, py, 22);
+        grad.addColorStop(0, 'rgba(255, 40, 40, 0.8)');
+        grad.addColorStop(1, 'rgba(255, 40, 40, 0)');
+        ctx.beginPath();
+        ctx.arc(px, py, 22, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Dot
+        ctx.beginPath();
+        ctx.arc(px, py, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff2828';
+        ctx.fill();
+
+        // IMU 3-axis arrows on top of the dot
+        drawArrow(px, py, imu.ax * 25, 0, '#ff4444');   // X = red, horizontal
+        drawArrow(px, py, 0, -imu.ay * 25, '#44ff44');  // Y = green, vertical
+        // Z shown as a circle scale
+        const zR = Math.abs(imu.az) * 8;
+        if (zR > 2) {
+            ctx.beginPath();
+            ctx.arc(px, py, zR, 0, Math.PI * 2);
+            ctx.strokeStyle = '#4488ff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        // Label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 12px monospace';
+        const dist = Math.round(Math.sqrt(t.x * t.x + t.y * t.y));
+        ctx.fillText(`T${id} ${dist}mm ${t.speed}cm/s`, px + 16, py - 8);
+    }
+
+    // Top-right IMU & ML mini display
+    const imX = canvas.width - 160;
+    const imY = 20;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(imX - 10, imY - 4, 165, 140);
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#0f0';
+    const gf = Math.sqrt(imu.ax*imu.ax + imu.ay*imu.ay + imu.az*imu.az);
+    ctx.fillText(`AX: ${imu.ax.toFixed(2)}g`, imX, imY + 12);
+    ctx.fillText(`AY: ${imu.ay.toFixed(2)}g`, imX, imY + 26);
+    ctx.fillText(`AZ: ${imu.az.toFixed(2)}g`, imX, imY + 40);
+    ctx.fillStyle = gf > 3.0 ? '#f44' : '#0f0';
+    ctx.fillText(`|G|: ${gf.toFixed(2)}`, imX, imY + 58);
+    
+    // ML & Fusion Data
+    ctx.fillStyle = imu.mlFall > 80 ? '#f44' : '#ff0';
+    ctx.fillText(`ML_FALL : ${imu.mlFall}%`, imX, imY + 76);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(`ML_CONF : ${imu.mlConf}%`, imX, imY + 90);
+    ctx.fillStyle = imu.fusion > 0.6 ? '#f44' : '#0f0';
+    ctx.fillText(`FUSION  : ${imu.fusion.toFixed(2)}`, imX, imY + 104);
+    ctx.fillText(`RADAR_F : ${imu.radar.toFixed(2)}`, imX, imY + 118);
+
+    ctx.fillStyle = wearLink ? '#0f0' : '#f44';
+    ctx.fillText(`LINK: ${wearLink ? 'OK' : 'LOST'}`, imX, imY + 132);
+
+    requestAnimationFrame(draw);
+}
+
+function drawArrow(x, y, dx, dy, color) {
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + dx, y + dy);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Arrowhead
+    const angle = Math.atan2(dy, dx);
+    const hl = 6;
+    ctx.beginPath();
+    ctx.moveTo(x + dx, y + dy);
+    ctx.lineTo(x + dx - hl * Math.cos(angle - 0.4), y + dy - hl * Math.sin(angle - 0.4));
+    ctx.lineTo(x + dx - hl * Math.cos(angle + 0.4), y + dy - hl * Math.sin(angle + 0.4));
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+}
+
+draw();
+
+// Serial
+document.getElementById('btn-serial').addEventListener('click', async () => {
+    try {
+        const port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        const decoder = new TextDecoderStream();
+        port.readable.pipeTo(decoder.writable);
+        const reader = decoder.readable.getReader();
+        let buf = '';
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += value;
+            let lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) parseLine(line.trim());
+        }
+    } catch(e) { console.error(e); }
+});
+
+function parseLine(line) {
+    if (!line) return;
+    console.log("RX: " + line); // Print all incoming data to dev console
+
+    // Radar targets: T1: x=123mm y=456mm spd=12cm/s res=50mm VALID
+    // Works for both Ranger 2 (radarSerialDebug) and Ranger 3 (FusionNode)
+    const tm = line.match(/T(\d+):\s*x=(-?\d+)mm\s*y=(-?\d+)mm\s*spd=(-?\d+)cm\/s.*?(VALID|INVALID|---)/);
+    if (tm) {
+        if (tm[5] === 'VALID') {
+            targets[tm[1]] = {
+                x: parseInt(tm[2]), y: parseInt(tm[3]),
+                speed: parseInt(tm[4]), lastSeen: Date.now()
+            };
+        }
+        return;
+    }
+
+    // Ranger 2 IMU (legacy): IMU: ax=0.12 ay=-0.03 az=1.01 gx=1.2 gy=-0.5 gz=0.3 fall=0 impact=0.0
+    const imuR2 = line.match(/IMU:\s*ax=(-?[\d.]+)\s*ay=(-?[\d.]+)\s*az=(-?[\d.]+)\s*gx=(-?[\d.]+)\s*gy=(-?[\d.]+)\s*gz=(-?[\d.]+)/);
+    if (imuR2) {
+        imu.ax = parseFloat(imuR2[1]);
+        imu.ay = parseFloat(imuR2[2]);
+        imu.az = parseFloat(imuR2[3]);
+        imu.gx = parseFloat(imuR2[4]);
+        imu.gy = parseFloat(imuR2[5]);
+        imu.gz = parseFloat(imuR2[6]);
+        wearLink = true;
+        return;
+    }
+
+    // Ranger 2 TELEMETRY (new): TELEMETRY: ax=0.12 ay=-0.03 az=1.01 gx=1.2 gy=-0.5 gz=0.3 mlFall=99 mlConf=99 fusion=0.85 radar=0.50
+    const telem = line.match(/TELEMETRY:\s*ax=(-?[\d.]+)\s*ay=(-?[\d.]+)\s*az=(-?[\d.]+)\s*gx=(-?[\d.]+)\s*gy=(-?[\d.]+)\s*gz=(-?[\d.]+)\s*mlFall=(\d+)\s*mlConf=(\d+)\s*fusion=([\d.]+)\s*radar=([\d.]+)/);
+    if (telem) {
+        imu.ax = parseFloat(telem[1]);
+        imu.ay = parseFloat(telem[2]);
+        imu.az = parseFloat(telem[3]);
+        imu.gx = parseFloat(telem[4]);
+        imu.gy = parseFloat(telem[5]);
+        imu.gz = parseFloat(telem[6]);
+        imu.mlFall = parseInt(telem[7]);
+        imu.mlConf = parseInt(telem[8]);
+        imu.fusion = parseFloat(telem[9]);
+        imu.radar = parseFloat(telem[10]);
+        wearLink = true;
+        return;
+    }
+
+    // Ranger 3 IMU: RX> I,ax,ay,az,gx,gy,gz,seq (raw int16 values)
+    if (line.startsWith('RX> I,')) {
+        const p = line.replace('RX> I,', '').split(',');
+        if (p.length >= 6) {
+            imu.ax = parseInt(p[0]) / 4096.0;
+            imu.ay = parseInt(p[1]) / 4096.0;
+            imu.az = parseInt(p[2]) / 4096.0;
+            imu.gx = parseInt(p[3]) / 65.5;
+            imu.gy = parseInt(p[4]) / 65.5;
+            imu.gz = parseInt(p[5]) / 65.5;
+        }
+        return;
+    }
+
+    // Ranger 3 ENV: RX> E,press,ir,red,bat,sos,seq
+    if (line.startsWith('RX> E,')) {
+        const p = line.replace('RX> E,', '').split(',');
+        if (p.length >= 5) {
+            battery = parseInt(p[3]);
+            sos = p[4] === '1';
+        }
+        return;
+    }
+
+    // Link status (Ranger 3)
+    if (line.includes('STAT,W_OK') || line.includes('STAT,BASE_LINK_OK')) wearLink = true;
+    if (line.includes('STAT,W_LOST') || line.includes('STAT,LINK_LOST')) wearLink = false;
+}
+</script>
+</body>
+</html>

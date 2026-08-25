@@ -1,0 +1,31 @@
+# Compiled binaries and build directories
+build/
+bin/
+*.bin
+*.elf
+*.hex
+*.o
+*.d
+*.a
+*.map
+.pio/
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backups and temporary files
+*.bak
+*.tmp
+*~
+*.swp
+*.swo
+scratch/
+backups/
