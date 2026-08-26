@@ -1,4 +1,4 @@
-# RANGER - Multi-Node Fall Detection System with Radar + Wearable IMU Fusion
+# RANGER  Multi-Node Fall Detection System 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Wearable Core: Nordic nRF54L15 | nRF52840](https://img.shields.io/badge/Wearable%20Core-Nordic%20nRF54L15%20%7C%20nRF52840-00A9CE.svg)](#wearable-platform-nordic-nrf54l15)
