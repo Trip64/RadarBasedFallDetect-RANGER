@@ -10,7 +10,7 @@
  * USAGE:
  *   1. Flash this sketch
  *   2. Open a terminal and run the capture script:
- *        cd /Users/gorkem/Ranger/EI_DataCollector
+ *        cd tools/EI_DataCollector
  *        bash capture.sh idle        (for idle recording)
  *        bash capture.sh walking     (for walking recording)
  *        bash capture.sh fall        (for fall recording)

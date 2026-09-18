@@ -1,302 +1,662 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Ranger Radar</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #000; overflow: hidden; }
-        #bg-video {
-            position: fixed; top: 0; left: 0;
-            width: 100vw; height: 100vh;
-            object-fit: cover; z-index: 0; opacity: 0.5;
-        }
-        canvas {
-            position: fixed; top: 0; left: 0;
-            width: 100vw; height: 100vh; z-index: 1;
-        }
-        .btns {
-            position: fixed; top: 12px; left: 12px; z-index: 10;
-            display: flex; gap: 8px;
-        }
-        .btns button {
-            background: rgba(0,0,0,0.6); color: #0f0;
-            border: 1px solid #0f0; padding: 8px 14px;
-            font: bold 12px monospace; cursor: pointer;
-        }
-        .btns button:hover { background: #0f0; color: #000; }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07100e">
+  <title>RANGER Radar Lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050908;
+      --panel: rgba(11, 20, 18, .88);
+      --panel2: rgba(14, 28, 24, .84);
+      --line: rgba(111, 255, 196, .16);
+      --line2: rgba(255,255,255,.08);
+      --text: #e7fff5;
+      --muted: #7ea092;
+      --green: #60f5ae;
+      --green2: #1fc77e;
+      --cyan: #65d9ff;
+      --amber: #ffc766;
+      --red: #ff667d;
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 14% 0%, rgba(44, 206, 137, .11), transparent 32rem),
+        radial-gradient(circle at 90% 18%, rgba(45, 166, 217, .08), transparent 32rem),
+        #050908;
+      padding: 18px;
+    }
+    button, select, input { font: inherit; }
+    button, select {
+      border: 1px solid var(--line2); border-radius: 10px; color: var(--text);
+      background: rgba(255,255,255,.045); min-height: 38px; padding: 0 12px;
+    }
+    button { cursor: pointer; transition: .16s ease; }
+    button:hover { border-color: rgba(96,245,174,.4); background: rgba(96,245,174,.08); }
+    button:disabled { opacity: .42; cursor: not-allowed; }
+    button.primary { color: #02150e; background: var(--green); border-color: var(--green); font-weight: 750; }
+    button.primary:hover { background: #8bffca; }
+    button.active { border-color: var(--green); color: var(--green); background: rgba(96,245,174,.09); }
+    select { padding-right: 28px; }
+    .shell { max-width: 1580px; margin: 0 auto; }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 18px;
+      margin-bottom: 14px; padding: 4px 2px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 210px; }
+    .brand-mark {
+      width: 38px; height: 38px; border: 1px solid rgba(96,245,174,.5); border-radius: 50%;
+      position: relative; box-shadow: inset 0 0 18px rgba(96,245,174,.08), 0 0 20px rgba(96,245,174,.05);
+    }
+    .brand-mark::before, .brand-mark::after { content:""; position:absolute; background:var(--green); opacity:.8; }
+    .brand-mark::before { width: 1px; height: 26px; left: 18px; top: 5px; transform: rotate(39deg); transform-origin: bottom; }
+    .brand-mark::after { width: 5px; height: 5px; border-radius:50%; left:16px; top:16px; box-shadow: 0 0 8px var(--green); }
+    h1 { font-size: 18px; margin: 0; letter-spacing: .18em; }
+    .subtitle { color: var(--muted); font-size: 11px; letter-spacing: .08em; margin-top: 3px; }
+    .status-row, .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px;
+      border: 1px solid var(--line2); border-radius: 999px; color: var(--muted); font-size: 12px;
+      background: rgba(0,0,0,.18); white-space: nowrap;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #52615b; box-shadow: 0 0 0 3px rgba(82,97,91,.1); }
+    .pill.good { color: var(--green); border-color: rgba(96,245,174,.23); }
+    .pill.good .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .pill.warn { color: var(--amber); }
+    .pill.warn .dot { background: var(--amber); }
+    .pill.bad { color: var(--red); }
+    .pill.bad .dot { background: var(--red); box-shadow: 0 0 8px rgba(255,102,125,.6); }
+    .toolbar {
+      background: var(--panel); border: 1px solid var(--line2); border-radius: var(--radius);
+      padding: 10px; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom: 12px;
+      backdrop-filter: blur(16px);
+    }
+    .control-set { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .control-label { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.1em; margin-left:4px; }
+    .grid { display:grid; grid-template-columns: minmax(520px, 1.75fr) minmax(310px, .85fr); gap:12px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line2); border-radius: var(--radius);
+      overflow:hidden; position:relative; backdrop-filter: blur(16px);
+    }
+    .card-head { padding: 14px 16px 10px; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .eyebrow { color:var(--green); font-size:10px; letter-spacing:.16em; text-transform:uppercase; margin-bottom:5px; }
+    h2 { font-size:15px; margin:0; font-weight:680; }
+    .small { color:var(--muted); font-size:11px; }
+    .radar-card { min-height: 620px; display:flex; flex-direction:column; }
+    .radar-wrap { position:relative; flex:1; min-height:485px; margin:0 12px 12px; overflow:hidden; border-radius:14px; background:#030807; border:1px solid rgba(96,245,174,.08); }
+    #radarCanvas { display:block; width:100%; height:100%; position:absolute; inset:0; z-index:2; }
+    #camera { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.24; filter:saturate(.6) contrast(1.12); display:none; z-index:1; }
+    .radar-no-data { position:absolute; z-index:3; inset:50% auto auto 50%; transform:translate(-50%,-50%); text-align:center; pointer-events:none; }
+    .radar-no-data strong { display:block; font-size:13px; letter-spacing:.14em; color:rgba(231,255,245,.66); }
+    .radar-no-data span { font-size:11px; color:#557267; }
+    .side { display:grid; gap:12px; align-content:start; }
+    .metrics { display:grid; grid-template-columns:repeat(3,1fr); padding:0 12px 12px; gap:8px; }
+    .metric { border:1px solid var(--line2); border-radius:12px; padding:10px; background:rgba(255,255,255,.025); min-width:0; }
+    .metric .label { color:var(--muted); font-size:9px; letter-spacing:.11em; text-transform:uppercase; white-space:nowrap; }
+    .metric .value { font: 650 19px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace; margin-top:4px; overflow:hidden; text-overflow:ellipsis; }
+    .metric .unit { font-size:10px; color:var(--muted); margin-left:2px; }
+    .target-list { padding:0 12px 12px; display:grid; gap:7px; }
+    .target-row { display:grid; grid-template-columns:12px 1fr auto; gap:10px; align-items:center; padding:10px; border:1px solid var(--line2); border-radius:12px; background:rgba(255,255,255,.025); }
+    .target-color { width:8px; height:8px; border-radius:50%; box-shadow:0 0 8px currentColor; }
+    .target-main { font-size:12px; }
+    .target-meta { color:var(--muted); font:10px ui-monospace, monospace; margin-top:3px; }
+    .speed { font:600 12px ui-monospace, monospace; }
+    .positive { color:var(--amber); } .negative { color:var(--cyan); }
+    .bars { padding:0 14px 14px; display:grid; gap:11px; }
+    .bar-line { display:grid; grid-template-columns:70px 1fr 48px; align-items:center; gap:9px; }
+    .bar-label { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+    .bar-track { height:7px; background:rgba(255,255,255,.06); border-radius:99px; overflow:hidden; }
+    .bar-fill { height:100%; width:0; border-radius:inherit; background:var(--green); transition:width .15s linear; }
+    .bar-value { font:11px ui-monospace,monospace; text-align:right; }
+    .imu-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; padding:0 12px 12px; }
+    .imu-cell { padding:8px; border:1px solid var(--line2); border-radius:10px; background:rgba(255,255,255,.02); }
+    .imu-cell span { display:block; color:var(--muted); font-size:9px; }
+    .imu-cell b { font:600 12px ui-monospace, monospace; }
+    .console-card { grid-column:1/-1; }
+    .console-actions { display:flex; gap:6px; }
+    #log {
+      height:190px; overflow:auto; margin:0 12px 12px; padding:11px 12px; border-radius:12px;
+      background:#020605; border:1px solid rgba(255,255,255,.06); color:#86ad9d;
+      font:11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; overflow-wrap:anywhere;
+    }
+    #log .parsed { color:#9ce8c5; } #log .badline { color:var(--amber); } #log .system { color:#68c8ee; }
+    .footer-note { color:#536e63; font-size:10px; padding:0 4px; margin-top:9px; display:flex; justify-content:space-between; gap:12px; }
+    .toast { position:fixed; right:20px; bottom:20px; background:#12231d; border:1px solid rgba(96,245,174,.3); border-radius:12px; padding:11px 14px; color:var(--text); font-size:12px; opacity:0; transform:translateY(8px); pointer-events:none; transition:.2s; z-index:20; }
+    .toast.show { opacity:1; transform:none; }
+    @media (max-width: 950px) {
+      header { align-items:flex-start; flex-direction:column; }
+      .grid { grid-template-columns:1fr; }
+      .radar-card { min-height:570px; }
+      .console-card { grid-column:auto; }
+    }
+    @media (max-width: 580px) {
+      body { padding:9px; }
+      .toolbar { align-items:stretch; flex-direction:column; }
+      .toolbar .control-set { display:grid; grid-template-columns:1fr 1fr; }
+      .control-label { display:none; }
+      .radar-card { min-height:490px; }
+      .radar-wrap { min-height:385px; }
+      .metrics { grid-template-columns:repeat(2,1fr); }
+      .status-row { width:100%; overflow:auto; flex-wrap:nowrap; padding-bottom:2px; }
+      .footer-note { flex-direction:column; }
+    }
+
+    /* Dense instrument layout: deliberately plain, square and data-first. */
+    :root {
+      --bg:#000; --panel:#050806; --panel2:#070b08; --line:#17542e; --line2:#183324;
+      --text:#d8e2da; --muted:#76907d; --green:#38e06f; --green2:#22a94f;
+      --cyan:#58bfff; --amber:#e5b84b; --red:#ff5b5b; --radius:0;
+    }
+    html,body { height:100%; }
+    body {
+      padding:0; overflow:hidden;
+      font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      background:#000;
+    }
+    .shell { max-width:none; height:100vh; display:grid; grid-template-rows:32px 38px minmax(0,1fr) 20px; }
+    header {
+      min-height:32px; margin:0; padding:0 10px; gap:14px;
+      border-bottom:1px solid var(--line); background:#030504;
+    }
+    .brand { min-width:auto; gap:0; }
+    .brand-mark { display:none; }
+    h1 { font-size:12px; letter-spacing:.08em; font-weight:700; color:var(--green); }
+    .subtitle { display:inline; margin:0 0 0 9px; color:var(--muted); font-size:11px; letter-spacing:0; }
+    .brand > div:last-child { display:flex; align-items:center; }
+    .status-row { flex-wrap:nowrap; gap:12px; }
+    .pill {
+      height:auto; padding:0; gap:5px; border:0; border-radius:0;
+      background:transparent; color:var(--muted); font-size:10px;
+    }
+    .dot { width:5px; height:5px; box-shadow:none; }
+    .pill.good,.pill.warn,.pill.bad { border:0; }
+    .pill.good .dot,.pill.bad .dot { box-shadow:none; }
+    .toolbar {
+      margin:0; padding:4px 7px; border:0; border-bottom:1px solid var(--line2);
+      border-radius:0; background:#050806; backdrop-filter:none; gap:6px;
+    }
+    .control-set { gap:5px; flex-wrap:nowrap; }
+    .control-label { margin:0 3px; font-size:9px; letter-spacing:.08em; color:#597260; }
+    button,select {
+      min-height:27px; height:27px; padding:0 9px; border:1px solid #274331;
+      border-radius:0; background:#090d0a; color:#b7c7ba;
+      font:10px ui-monospace,SFMono-Regular,Menlo,monospace; text-transform:uppercase;
+    }
+    button:hover { border-color:var(--green); background:#0b170f; }
+    button.primary { color:#071008; background:var(--green); border-color:var(--green); font-weight:700; }
+    button.primary:hover { background:#6af093; }
+    button.active { border-color:var(--amber); color:var(--amber); background:#151208; }
+    .grid {
+      min-height:0; display:grid; grid-template-columns:minmax(500px,3fr) minmax(285px,1fr);
+      grid-template-rows:minmax(0,1fr) 155px; gap:1px; background:var(--line2);
+    }
+    .card { border:0; border-radius:0; background:#030604; backdrop-filter:none; overflow:hidden; }
+    .card-head {
+      height:29px; padding:0 8px; align-items:center; border-bottom:1px solid #102719;
+      background:#050906;
+    }
+    .card-head > div:first-child { display:flex; align-items:center; gap:9px; min-width:0; }
+    .eyebrow { margin:0; color:#63876d; font-size:9px; letter-spacing:.08em; white-space:nowrap; }
+    h2 { margin:0; font-size:10px; color:#c8d4ca; font-weight:600; text-transform:uppercase; }
+    .small { color:var(--muted); font-size:9px; }
+    .radar-card { min-height:0; height:auto; }
+    .radar-wrap { flex:1; min-height:0; margin:0; border:0; border-radius:0; background:#010302; }
+    .radar-no-data strong { font-size:11px; letter-spacing:.08em; color:#819087; }
+    .radar-no-data span { font-size:9px; color:#516057; }
+    .side {
+      min-height:0; display:grid; grid-template-rows:auto minmax(92px,1fr) auto auto;
+      gap:1px; background:var(--line2); overflow:auto;
+    }
+    .metrics { display:grid; grid-template-columns:repeat(3,1fr); padding:0; gap:0; }
+    .metric {
+      min-width:0; padding:6px 7px; border:0; border-right:1px solid #102719;
+      border-bottom:1px solid #102719; border-radius:0; background:#030604;
+    }
+    .metric .label { font-size:8px; letter-spacing:.04em; color:#637669; }
+    .metric .value { margin-top:1px; font:600 13px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .metric .unit { font-size:8px; }
+    .target-list { padding:0; gap:0; }
+    .target-row {
+      grid-template-columns:8px 1fr auto; gap:7px; padding:6px 8px;
+      border:0; border-bottom:1px solid #102719; border-radius:0; background:#030604;
+    }
+    .target-color { width:5px; height:5px; box-shadow:none; }
+    .target-main { font-size:10px; }
+    .target-meta { margin-top:1px; font-size:8px; }
+    .speed { font-size:9px; }
+    .bars { padding:7px 8px; gap:6px; }
+    .bar-line { grid-template-columns:62px 1fr 42px; gap:6px; }
+    .bar-label { font-size:8px; letter-spacing:.03em; }
+    .bar-track { height:4px; border-radius:0; background:#142018; }
+    .bar-fill { border-radius:0; transition:none; }
+    .bar-value { font-size:9px; }
+    .imu-grid { grid-template-columns:repeat(6,1fr); gap:0; padding:0; border-top:1px solid #102719; }
+    .imu-cell { padding:5px 6px; border:0; border-right:1px solid #102719; border-radius:0; background:#030604; }
+    .imu-cell span { font-size:7px; }
+    .imu-cell b { font-size:9px; }
+    .console-card { grid-column:1/-1; min-height:0; }
+    .console-actions { gap:4px; }
+    .console-actions button { height:22px; min-height:22px; }
+    #log {
+      height:calc(100% - 29px); margin:0; padding:5px 8px; border:0; border-radius:0;
+      background:#010302; color:#708a78; font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    #log .parsed { color:#8ac39a; }
+    #log .badline { color:var(--amber); }
+    #log .system { color:#6c9db5; }
+    .footer-note {
+      margin:0; padding:3px 8px 0; background:#030504; color:#526358;
+      font-size:8px; border-top:1px solid #102719;
+    }
+    .toast {
+      right:8px; bottom:24px; padding:5px 8px; border:1px solid var(--green);
+      border-radius:0; background:#050a06; font-size:9px; transform:none;
+    }
+    @media (max-width:760px) {
+      body { overflow:auto; }
+      .shell { height:auto; min-height:100vh; display:block; }
+      header { height:auto; min-height:32px; flex-wrap:wrap; }
+      .toolbar { align-items:stretch; flex-direction:column; }
+      .control-set { flex-wrap:wrap; }
+      .grid { grid-template-columns:1fr; grid-template-rows:480px auto 150px; }
+      .radar-card { min-height:480px; }
+      .console-card { grid-column:auto; height:150px; }
+      .side { overflow:visible; }
+      .footer-note { min-height:20px; }
+    }
+    @media (max-width:480px) {
+      .subtitle,.control-label,.footer-note span:first-child { display:none; }
+      .status-row { width:100%; justify-content:space-between; }
+      .toolbar .control-set { display:flex; }
+      .grid { grid-template-rows:400px auto 150px; }
+      .radar-card { min-height:400px; }
+      .imu-grid { grid-template-columns:repeat(3,1fr); }
+    }
+  </style>
 </head>
 <body>
-    <video id="bg-video" autoplay playsinline muted></video>
-    <canvas id="c"></canvas>
-    <div class="btns">
-        <button id="btn-serial">CONNECT SERIAL</button>
-        <button id="btn-cam">ENABLE CAM</button>
-    </div>
+  <div class="shell">
+    <header>
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div><h1>RANGER / RD03</h1><div class="subtitle">DEBUG CONSOLE</div></div>
+      </div>
+      <div class="status-row">
+        <div class="pill" id="serialPill"><i class="dot"></i><span id="serialState">Serial offline</span></div>
+        <div class="pill" id="sourcePill"><i class="dot"></i><span id="sourceState">No source</span></div>
+        <div class="pill" id="freshPill"><i class="dot"></i><span id="freshState">Waiting for data</span></div>
+      </div>
+    </header>
 
-<script>
-const MAX_DIST = 8000;
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
+    <section class="toolbar" aria-label="Radar controls">
+      <div class="control-set">
+        <span class="control-label">Connection</span>
+        <select id="baud" aria-label="Serial baud rate">
+          <option value="115200">115200 baud</option>
+          <option value="256000">256000 baud</option>
+        </select>
+        <button class="primary" id="connectBtn">Connect serial</button>
+        <button id="demoBtn">Start demo</button>
+        <button id="cameraBtn">Camera</button>
+      </div>
+      <div class="control-set">
+        <span class="control-label">View</span>
+        <select id="range" aria-label="Radar range">
+          <option value="3000">3 m range</option>
+          <option value="5000">5 m range</option>
+          <option value="8000" selected>8 m range</option>
+          <option value="12000">12 m range</option>
+        </select>
+        <button id="pauseBtn">Pause</button>
+        <button id="clearBtn">Clear</button>
+        <button id="saveBtn">Save CSV</button>
+      </div>
+    </section>
 
-let targets = {};
-let imu = { ax: 0, ay: 0, az: 0, gx: 0, gy: 0, gz: 0, mlFall: 0, mlConf: 0, fusion: 0, radar: 0 };
-let wearLink = false;
-let battery = -1;
-let sos = false;
+    <main class="grid">
+      <section class="card radar-card">
+        <div class="card-head">
+          <div><div class="eyebrow">RD03 Cartesian space</div><h2>Target position map</h2></div>
+          <div class="small" id="axisNote">raw sensor axes · ±8 m × 8 m</div>
+        </div>
+        <div class="radar-wrap" id="radarWrap">
+          <video id="camera" muted playsinline></video>
+          <canvas id="radarCanvas"></canvas>
+          <div class="radar-no-data" id="noData"><strong>NO TARGET FRAMES</strong><span>Connect the base or run the demo</span></div>
+        </div>
+      </section>
 
-function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-}
-window.addEventListener('resize', resize);
-resize();
+      <aside class="side">
+        <section class="card">
+          <div class="card-head"><div><div class="eyebrow">Live session</div><h2>Stream health</h2></div><span class="small" id="versionText">—</span></div>
+          <div class="metrics">
+            <div class="metric"><div class="label">Lines</div><div class="value" id="linesRate">0<span class="unit">/s</span></div></div>
+            <div class="metric"><div class="label">Radar</div><div class="value" id="radarRate">0<span class="unit">/s</span></div></div>
+            <div class="metric"><div class="label">Frame age</div><div class="value" id="frameAge">—</div></div>
+            <div class="metric"><div class="label">Parsed</div><div class="value" id="parsedCount">0</div></div>
+            <div class="metric"><div class="label">Ignored</div><div class="value" id="ignoredCount">0</div></div>
+            <div class="metric"><div class="label">Errors</div><div class="value" id="errorCount">0</div></div>
+          </div>
+        </section>
 
-// Camera
-document.getElementById('btn-cam').addEventListener('click', async () => {
-    try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        document.getElementById('bg-video').srcObject = s;
-    } catch(e) { console.error(e); }
-});
+        <section class="card">
+          <div class="card-head"><div><div class="eyebrow">RD03 targets</div><h2>Detected slots</h2></div><span class="small" id="targetCount">0 active</span></div>
+          <div class="target-list" id="targetList"><div class="small">No valid targets yet.</div></div>
+        </section>
 
-// Drawing
-function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const cx = canvas.width / 2;
-    const cy = canvas.height;
-    const maxR = Math.min(canvas.width / 2, canvas.height) - 30;
+        <section class="card">
+          <div class="card-head"><div><div class="eyebrow">Fall pipeline</div><h2>Motion and model</h2></div><span class="small" id="mlEvent">idle</span></div>
+          <div class="bars">
+            <div class="bar-line"><span class="bar-label">Impact |G|</span><span class="bar-track"><i class="bar-fill" id="gBar"></i></span><span class="bar-value" id="gValue">—</span></div>
+            <div class="bar-line"><span class="bar-label">ML fall</span><span class="bar-track"><i class="bar-fill" id="mlBar"></i></span><span class="bar-value" id="mlValue">—</span></div>
+            <div class="bar-line"><span class="bar-label">Fusion</span><span class="bar-track"><i class="bar-fill" id="fusionBar"></i></span><span class="bar-value" id="fusionValue">—</span></div>
+          </div>
+          <div class="imu-grid" id="imuGrid">
+            <div class="imu-cell"><span>AX · g</span><b id="ax">—</b></div><div class="imu-cell"><span>AY · g</span><b id="ay">—</b></div><div class="imu-cell"><span>AZ · g</span><b id="az">—</b></div>
+            <div class="imu-cell"><span>GX · °/s</span><b id="gx">—</b></div><div class="imu-cell"><span>GY · °/s</span><b id="gy">—</b></div><div class="imu-cell"><span>GZ · °/s</span><b id="gz">—</b></div>
+          </div>
+        </section>
 
-    // Grid rings
-    for (let i = 1; i <= 4; i++) {
-        const r = (maxR / 4) * i;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, Math.PI, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(0, 255, 0, 0.35)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        <section class="card">
+          <div class="card-head"><div><div class="eyebrow">Wearable</div><h2>Watch link</h2></div><span class="small" id="watchState">unknown</span></div>
+          <div class="metrics">
+            <div class="metric"><div class="label">Link</div><div class="value" id="linkValue">—</div></div>
+            <div class="metric"><div class="label">Battery</div><div class="value" id="batteryValue">—</div></div>
+            <div class="metric"><div class="label">SOS</div><div class="value" id="sosValue">—</div></div>
+          </div>
+        </section>
+      </aside>
 
-        // Distance labels
-        ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-        ctx.font = 'bold 13px monospace';
-        ctx.fillText((MAX_DIST / 4 * i / 1000).toFixed(1) + 'm', cx + 6, cy - r + 14);
+      <section class="card console-card">
+        <div class="card-head">
+          <div><div class="eyebrow">Incoming serial</div><h2>Message console</h2></div>
+          <div class="console-actions"><button id="copyBtn">Copy</button><button id="consoleClearBtn">Clear log</button></div>
+        </div>
+        <div id="log" role="log" aria-live="polite"></div>
+      </section>
+    </main>
+    <div class="footer-note"><span>Target numbers are radar slots, not persistent people. Coordinates are raw sensor axes.</span><span>Shortcuts: C connect · D demo · Space pause · X clear</span></div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script src="./radar-parser.js"></script>
+  <script>
+  (() => {
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    const parser = window.RangerRadarParser;
+    const colors = ["#60f5ae", "#65d9ff", "#ffc766", "#ff7ca8", "#b696ff"];
+    const state = {
+      port: null, reader: null, reading: false, demoTimer: null, cameraStream: null,
+      paused: false, source: "none", targets: new Map(), trails: new Map(), imu: null,
+      watchOnline: null, battery: null, sos: null, mlFall: null, fusion: null,
+      lastAny: 0, lastRadar: 0, lineTicks: [], radarTicks: [], parsed: 0, ignored: 0, errors: 0,
+      csv: [], logLines: [], animation: 0
+    };
+
+    function toast(message) {
+      const el = $("toast"); el.textContent = message; el.classList.add("show");
+      clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.remove("show"), 1900);
     }
+    function setPill(id, mode) { $(id).className = "pill" + (mode ? " " + mode : ""); }
+    function setSource(source) {
+      state.source = source;
+      $("sourceState").textContent = source === "serial" ? "Live serial" : source === "demo" ? "Demo stream" : "No source";
+      setPill("sourcePill", source === "none" ? "" : source === "demo" ? "warn" : "good");
+    }
+    function addLog(text, type = "") {
+      const stamp = new Date().toLocaleTimeString([], {hour12:false});
+      const line = `[${stamp}] ${text}`;
+      state.logLines.push(line); if (state.logLines.length > 350) state.logLines.shift();
+      const el = document.createElement("div"); el.textContent = line; if (type) el.className = type;
+      $("log").appendChild(el); while ($("log").children.length > 350) $("log").firstChild.remove();
+      $("log").scrollTop = $("log").scrollHeight;
+    }
+    function number(value, fallback = null) { return Number.isFinite(Number(value)) ? Number(value) : fallback; }
+    function valueOf(values, names) {
+      for (const name of names) if (values[name] !== undefined) return number(values[name]);
+      return null;
+    }
+    function record(kind, fields) {
+      state.csv.push({ time: new Date().toISOString(), source: state.source, kind, ...fields });
+      if (state.csv.length > 100000) state.csv.splice(0, 10000);
+    }
+    function handleLine(raw) {
+      const line = String(raw).trim(); if (!line || state.paused) return;
+      const now = performance.now(); state.lastAny = now; state.lineTicks.push(now);
+      let data;
+      try { data = parser.parseLine(line); } catch (err) { state.errors++; addLog(`Parser error: ${err.message}`, "badline"); return; }
+      if (["unknown", "empty"].includes(data.kind)) state.ignored++; else if (data.kind === "malformed") state.errors++; else state.parsed++;
+      if (data.kind !== "unknown" || state.ignored < 12) addLog(line, data.kind === "malformed" ? "badline" : data.kind === "unknown" ? "" : "parsed");
 
-    // Radial lines + angle labels
-    for (let a = 0; a <= 180; a += 30) {
-        const rad = (a * Math.PI) / 180;
-        const ex = cx + Math.cos(Math.PI + rad) * maxR;
-        const ey = cy + Math.sin(Math.PI + rad) * maxR;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(ex, ey);
-        ctx.strokeStyle = 'rgba(0, 255, 0, 0.15)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        // Angle label at the end of each radial line
-        if (a > 0 && a < 180) {
-            const lx = cx + Math.cos(Math.PI + rad) * (maxR + 16);
-            const ly = cy + Math.sin(Math.PI + rad) * (maxR + 16);
-            ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
-            ctx.font = '11px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText(a + '°', lx, ly);
+      if (data.kind === "target") {
+        state.lastRadar = now; state.radarTicks.push(now);
+        if (data.valid) {
+          const target = {...data, seen: now}; state.targets.set(data.id, target);
+          if (!state.trails.has(data.id)) state.trails.set(data.id, []);
+          const trail = state.trails.get(data.id); trail.push({x:data.xMm, y:data.yMm, at:now});
+          while (trail.length && now - trail[0].at > 10000) trail.shift();
+          record("target", {slot:data.id, x_mm:data.xMm, y_mm:data.yMm, speed_cm_s:data.speedCms, resolution_mm:data.resolutionMm ?? "", valid:1});
+        } else {
+          state.targets.delete(data.id);
+          record("target", {slot:data.id, x_mm:data.xMm, y_mm:data.yMm, speed_cm_s:data.speedCms, resolution_mm:data.resolutionMm ?? "", valid:0});
         }
+      } else if (data.kind === "telemetry" || data.kind === "imu") {
+        const v = data.values;
+        const next = {
+          ax:valueOf(v,["ax"]), ay:valueOf(v,["ay"]), az:valueOf(v,["az"]),
+          gx:valueOf(v,["gx"]), gy:valueOf(v,["gy"]), gz:valueOf(v,["gz"])
+        };
+        if (Object.values(next).some((v) => v !== null)) state.imu = {...(state.imu || {}), ...next};
+        const ml = valueOf(v,["mlfall","ml","fall"]), fusion = valueOf(v,["fusion","fusionscore"]);
+        if (ml !== null) state.mlFall = ml; if (fusion !== null) state.fusion = fusion;
+        record(data.kind, {...v});
+      } else if (data.kind === "imu-raw") {
+        state.imu = {ax:data.ax, ay:data.ay, az:data.az, gx:data.gx, gy:data.gy, gz:data.gz};
+        record("imu", state.imu);
+      } else if (data.kind === "environment") {
+        state.battery = data.battery; state.sos = data.sos; record("environment", {battery:data.battery,sos:data.sos?1:0,pressure_pa:data.pressurePa,ir:data.ir,red:data.red});
+      } else if (data.kind === "link") {
+        state.watchOnline = data.online;
+      } else if (data.kind === "ml-event") {
+        $("mlEvent").textContent = data.state; $("mlEvent").style.color = data.state === "confirmed" ? "var(--red)" : "var(--amber)";
+        if (data.fallPercent !== undefined) state.mlFall = data.fallPercent;
+      } else if (data.kind === "stats") {
+        const online = valueOf(data.values,["watch","link"]); if (online !== null) state.watchOnline = Boolean(online);
+      } else if (data.kind === "version") {
+        $("versionText").textContent = data.value;
+      }
+      updateReadouts();
     }
-    ctx.textAlign = 'left'; // Reset
 
-    // Targets
-    for (const [id, t] of Object.entries(targets)) {
-        if (Date.now() - t.lastSeen > 1500) { delete targets[id]; continue; }
+    function fmt(v, digits=2) { return Number.isFinite(v) ? v.toFixed(digits) : "—"; }
+    function setBar(id, value, max, color) {
+      const pct = Number.isFinite(value) ? Math.max(0, Math.min(100, value / max * 100)) : 0;
+      $(id).style.width = pct + "%"; $(id).style.background = color;
+    }
+    function updateReadouts() {
+      const i = state.imu || {};
+      for (const key of ["ax","ay","az","gx","gy","gz"]) $(key).textContent = fmt(i[key], key[0] === "a" ? 3 : 1);
+      const g = [i.ax,i.ay,i.az].every(Number.isFinite) ? Math.hypot(i.ax,i.ay,i.az) : null;
+      $("gValue").textContent = g === null ? "—" : g.toFixed(2)+"g"; setBar("gBar",g,4,"var(--cyan)");
+      const ml = state.mlFall; $("mlValue").textContent = ml === null ? "—" : (ml <= 1 ? Math.round(ml*100) : Math.round(ml))+"%"; setBar("mlBar",ml === null ? null : ml <= 1 ? ml*100 : ml,100,"var(--amber)");
+      const fu = state.fusion; $("fusionValue").textContent = fu === null ? "—" : (fu <= 1 ? Math.round(fu*100) : Math.round(fu))+"%"; setBar("fusionBar",fu === null ? null : fu <= 1 ? fu*100 : fu,100,"var(--red)");
+      $("linkValue").textContent = state.watchOnline === null ? "—" : state.watchOnline ? "OK" : "LOST";
+      $("linkValue").style.color = state.watchOnline === false ? "var(--red)" : state.watchOnline === true ? "var(--green)" : "";
+      $("watchState").textContent = state.watchOnline === null ? "unknown" : state.watchOnline ? "connected" : "link lost";
+      $("batteryValue").textContent = state.battery === null ? "—" : `${state.battery}%`;
+      $("sosValue").textContent = state.sos === null ? "—" : state.sos ? "YES" : "clear";
+      $("sosValue").style.color = state.sos ? "var(--red)" : "";
+    }
 
-        const px = cx + (t.x / MAX_DIST) * maxR;
-        const py = cy - (t.y / MAX_DIST) * maxR;
+    function updateTargetList(now) {
+      const active = [...state.targets.values()].filter((t) => now-t.seen < 1600).sort((a,b)=>a.id-b.id);
+      $("targetCount").textContent = `${active.length} active`;
+      const list = $("targetList"); list.replaceChildren();
+      if (!active.length) { const el=document.createElement("div"); el.className="small"; el.textContent="No valid targets yet."; list.appendChild(el); return; }
+      active.forEach((t) => {
+        const row=document.createElement("div"); row.className="target-row";
+        const dot=document.createElement("i"); dot.className="target-color"; dot.style.color=colors[(t.id-1)%colors.length]; dot.style.background="currentColor";
+        const info=document.createElement("div"); info.className="target-main"; info.textContent=`Target ${t.id} · ${(Math.hypot(t.xMm,t.yMm)/1000).toFixed(2)} m`;
+        const meta=document.createElement("div"); meta.className="target-meta"; meta.textContent=`X ${signed(t.xMm)}  Y ${signed(t.yMm)} mm · ${Math.round(now-t.seen)} ms`;
+        info.appendChild(meta);
+        const speed=document.createElement("div"); speed.className="speed "+(t.speedCms<0?"negative":t.speedCms>0?"positive":""); speed.textContent=`${signed(t.speedCms)} cm/s`;
+        row.append(dot,info,speed); list.appendChild(row);
+      });
+    }
+    function signed(v) { return `${v>=0?"+":""}${Math.round(v)}`; }
 
-        // Glow
-        const grad = ctx.createRadialGradient(px, py, 0, px, py, 22);
-        grad.addColorStop(0, 'rgba(255, 40, 40, 0.8)');
-        grad.addColorStop(1, 'rgba(255, 40, 40, 0)');
-        ctx.beginPath();
-        ctx.arc(px, py, 22, 0, Math.PI * 2);
-        ctx.fillStyle = grad;
-        ctx.fill();
+    const canvas=$("radarCanvas"), ctx=canvas.getContext("2d");
+    function sizeCanvas() {
+      const rect=canvas.getBoundingClientRect(), dpr=Math.min(window.devicePixelRatio||1,2);
+      if (canvas.width!==Math.round(rect.width*dpr)||canvas.height!==Math.round(rect.height*dpr)) {
+        canvas.width=Math.round(rect.width*dpr); canvas.height=Math.round(rect.height*dpr); ctx.setTransform(dpr,0,0,dpr,0,0);
+      }
+      return rect;
+    }
+    function drawRadar(now) {
+      const rect=sizeCanvas(), w=rect.width, h=rect.height, max=Number($("range").value);
+      ctx.clearRect(0,0,w,h);
+      const pad={l:45,r:25,t:25,b:42}, pw=w-pad.l-pad.r, ph=h-pad.t-pad.b;
+      const xpx=(x)=>pad.l+(x+max)/(2*max)*pw, ypx=(y)=>pad.t+ph-(y/max)*ph;
+      ctx.fillStyle="rgba(1,9,6,.72)"; ctx.fillRect(0,0,w,h);
+      const glow=ctx.createRadialGradient(xpx(0),ypx(0),0,xpx(0),ypx(0),Math.max(pw,ph)); glow.addColorStop(0,"rgba(45,235,146,.08)"); glow.addColorStop(1,"rgba(0,0,0,0)"); ctx.fillStyle=glow; ctx.fillRect(0,0,w,h);
+      ctx.lineWidth=1; ctx.strokeStyle="rgba(96,245,174,.115)"; ctx.fillStyle="rgba(126,160,146,.72)"; ctx.font="10px ui-monospace,monospace";
+      for(let i=0;i<=8;i++) {
+        const x=pad.l+pw*i/8; ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,pad.t+ph);ctx.stroke();
+        const xv=(-max+2*max*i/8)/1000; ctx.textAlign="center";ctx.fillText(`${xv===0?0:xv.toFixed(xv%1?1:0)}m`,x,h-14);
+      }
+      for(let i=0;i<=8;i++) {
+        const y=pad.t+ph*i/8; ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(pad.l+pw,y);ctx.stroke();
+        ctx.textAlign="right";ctx.fillText(`${((max*(8-i)/8)/1000).toFixed(max%8000?1:0)}m`,pad.l-7,y+3);
+      }
+      // Range arcs and forward axis.
+      ctx.strokeStyle="rgba(96,245,174,.20)"; ctx.setLineDash([4,6]);
+      for (const f of [.25,.5,.75,1]) { ctx.beginPath(); ctx.ellipse(xpx(0),ypx(0),pw*.5*f,ph*f,0,Math.PI,2*Math.PI); ctx.stroke(); }
+      ctx.setLineDash([]);ctx.strokeStyle="rgba(96,245,174,.38)";ctx.beginPath();ctx.moveTo(xpx(0),pad.t);ctx.lineTo(xpx(0),ypx(0));ctx.stroke();
+      ctx.fillStyle="rgba(96,245,174,.8)";ctx.textAlign="center";ctx.font="10px ui-monospace,monospace";ctx.fillText("FORWARD +Y",xpx(0),pad.t+13);
+      ctx.fillStyle="#60f5ae";ctx.beginPath();ctx.moveTo(xpx(0)-9,ypx(0));ctx.lineTo(xpx(0)+9,ypx(0));ctx.lineTo(xpx(0),ypx(0)-12);ctx.closePath();ctx.fill();
 
-        // Dot
-        ctx.beginPath();
-        ctx.arc(px, py, 6, 0, Math.PI * 2);
-        ctx.fillStyle = '#ff2828';
-        ctx.fill();
-
-        // IMU 3-axis arrows on top of the dot
-        drawArrow(px, py, imu.ax * 25, 0, '#ff4444');   // X = red, horizontal
-        drawArrow(px, py, 0, -imu.ay * 25, '#44ff44');  // Y = green, vertical
-        // Z shown as a circle scale
-        const zR = Math.abs(imu.az) * 8;
-        if (zR > 2) {
-            ctx.beginPath();
-            ctx.arc(px, py, zR, 0, Math.PI * 2);
-            ctx.strokeStyle = '#4488ff';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+      let visible=0;
+      for (const [id,t] of state.targets) {
+        if(now-t.seen>1600) continue;
+        if(Math.abs(t.xMm)>max || t.yMm<0 || t.yMm>max) continue;
+        visible++; const c=colors[(id-1)%colors.length], trail=state.trails.get(id)||[];
+        const validTrail=trail.filter(p=>now-p.at<10000&&Math.abs(p.x)<=max&&p.y>=0&&p.y<=max);
+        if(validTrail.length>1) {
+          ctx.beginPath(); validTrail.forEach((p,j)=>{const x=xpx(p.x),y=ypx(p.y);j?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+          const alpha=Math.min(.5,.12+validTrail.length/100);ctx.strokeStyle=hexAlpha(c,alpha);ctx.lineWidth=2;ctx.stroke();
         }
-
-        // Label
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 12px monospace';
-        const dist = Math.round(Math.sqrt(t.x * t.x + t.y * t.y));
-        ctx.fillText(`T${id} ${dist}mm ${t.speed}cm/s`, px + 16, py - 8);
+        const x=xpx(t.xMm),y=ypx(t.yMm), pulse=8+Math.sin(now/170+id)*2;
+        ctx.beginPath();ctx.arc(x,y,pulse+8,0,Math.PI*2);ctx.fillStyle=hexAlpha(c,.08);ctx.fill();
+        ctx.beginPath();ctx.arc(x,y,pulse,0,Math.PI*2);ctx.fillStyle=c;ctx.shadowColor=c;ctx.shadowBlur=15;ctx.fill();ctx.shadowBlur=0;
+        ctx.strokeStyle="#eafff6";ctx.lineWidth=1;ctx.stroke();
+        const label=`T${id}  ${(Math.hypot(t.xMm,t.yMm)/1000).toFixed(2)}m`;
+        ctx.font="600 11px ui-monospace,monospace";const tw=ctx.measureText(label).width;
+        const lx=Math.min(w-pad.r-tw-14,Math.max(pad.l,x+14)),ly=Math.max(pad.t+18,y-15);
+        ctx.fillStyle="rgba(2,10,7,.82)";ctx.fillRect(lx-5,ly-12,tw+10,18);ctx.fillStyle=c;ctx.textAlign="left";ctx.fillText(label,lx,ly);
+      }
+      $("noData").style.display=visible?"none":"block";
+      $("axisNote").textContent=`raw sensor axes · ±${max/1000} m × ${max/1000} m`;
+    }
+    function hexAlpha(hex, alpha) {
+      const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${alpha})`;
     }
 
-    // Top-right IMU & ML mini display
-    const imX = canvas.width - 160;
-    const imY = 20;
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(imX - 10, imY - 4, 165, 140);
-    ctx.font = '12px monospace';
-    ctx.fillStyle = '#0f0';
-    const gf = Math.sqrt(imu.ax*imu.ax + imu.ay*imu.ay + imu.az*imu.az);
-    ctx.fillText(`AX: ${imu.ax.toFixed(2)}g`, imX, imY + 12);
-    ctx.fillText(`AY: ${imu.ay.toFixed(2)}g`, imX, imY + 26);
-    ctx.fillText(`AZ: ${imu.az.toFixed(2)}g`, imX, imY + 40);
-    ctx.fillStyle = gf > 3.0 ? '#f44' : '#0f0';
-    ctx.fillText(`|G|: ${gf.toFixed(2)}`, imX, imY + 58);
-    
-    // ML & Fusion Data
-    ctx.fillStyle = imu.mlFall > 80 ? '#f44' : '#ff0';
-    ctx.fillText(`ML_FALL : ${imu.mlFall}%`, imX, imY + 76);
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(`ML_CONF : ${imu.mlConf}%`, imX, imY + 90);
-    ctx.fillStyle = imu.fusion > 0.6 ? '#f44' : '#0f0';
-    ctx.fillText(`FUSION  : ${imu.fusion.toFixed(2)}`, imX, imY + 104);
-    ctx.fillText(`RADAR_F : ${imu.radar.toFixed(2)}`, imX, imY + 118);
+    function frame(now) {
+      for (const [id,t] of state.targets) if(now-t.seen>10000){state.targets.delete(id);state.trails.delete(id);}
+      drawRadar(now); updateTargetList(now); updateHealth(now); state.animation=requestAnimationFrame(frame);
+    }
+    function updateHealth(now) {
+      state.lineTicks=state.lineTicks.filter(t=>now-t<1000); state.radarTicks=state.radarTicks.filter(t=>now-t<1000);
+      $("linesRate").innerHTML=`${state.lineTicks.length}<span class="unit">/s</span>`;
+      $("radarRate").innerHTML=`${state.radarTicks.length}<span class="unit">/s</span>`;
+      $("parsedCount").textContent=state.parsed; $("ignoredCount").textContent=state.ignored; $("errorCount").textContent=state.errors;
+      const age=state.lastRadar?now-state.lastRadar:null;
+      $("frameAge").textContent=age===null?"—":age<1000?`${Math.round(age)}ms`:`${(age/1000).toFixed(1)}s`;
+      if (!state.lastAny) { $("freshState").textContent="Waiting for data"; setPill("freshPill",""); }
+      else { const anyAge=now-state.lastAny; $("freshState").textContent=anyAge<1500?"Data flowing":anyAge<5000?"Data delayed":"Data stale";setPill("freshPill",anyAge<1500?"good":anyAge<5000?"warn":"bad"); }
+    }
 
-    ctx.fillStyle = wearLink ? '#0f0' : '#f44';
-    ctx.fillText(`LINK: ${wearLink ? 'OK' : 'LOST'}`, imX, imY + 132);
-
-    requestAnimationFrame(draw);
-}
-
-function drawArrow(x, y, dx, dy, color) {
-    const len = Math.sqrt(dx * dx + dy * dy);
-    if (len < 2) return;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + dx, y + dy);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-
-    // Arrowhead
-    const angle = Math.atan2(dy, dx);
-    const hl = 6;
-    ctx.beginPath();
-    ctx.moveTo(x + dx, y + dy);
-    ctx.lineTo(x + dx - hl * Math.cos(angle - 0.4), y + dy - hl * Math.sin(angle - 0.4));
-    ctx.lineTo(x + dx - hl * Math.cos(angle + 0.4), y + dy - hl * Math.sin(angle + 0.4));
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-}
-
-draw();
-
-// Serial
-document.getElementById('btn-serial').addEventListener('click', async () => {
-    try {
-        const port = await navigator.serial.requestPort();
-        await port.open({ baudRate: 115200 });
-        const decoder = new TextDecoderStream();
-        port.readable.pipeTo(decoder.writable);
-        const reader = decoder.readable.getReader();
-        let buf = '';
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += value;
-            let lines = buf.split('\n');
-            buf = lines.pop();
-            for (const line of lines) parseLine(line.trim());
+    async function connectSerial() {
+      if (state.port) { await disconnectSerial(); return; }
+      if (!("serial" in navigator)) { toast("Use Chrome or Edge on localhost for Web Serial"); addLog("Web Serial is unavailable in this browser.","badline"); return; }
+      stopDemo();
+      try {
+        state.port=await navigator.serial.requestPort(); await state.port.open({baudRate:Number($("baud").value)});
+        state.reading=true; $("connectBtn").textContent="Disconnect"; $("connectBtn").classList.remove("primary");
+        $("serialState").textContent=`Connected · ${$("baud").value}`; setPill("serialPill","good"); setSource("serial");
+        addLog(`Serial opened at ${$("baud").value} baud`,"system"); readSerial();
+      } catch (err) { state.port=null; addLog(`Serial connection failed: ${err.message}`,"badline"); toast("Serial connection cancelled or failed"); }
+    }
+    async function readSerial() {
+      const decoder=new TextDecoder(); let pending="";
+      try {
+        while(state.port && state.port.readable && state.reading) {
+          state.reader=state.port.readable.getReader();
+          try {
+            while(state.reading) {
+              const {value,done}=await state.reader.read(); if(done) break;
+              pending+=decoder.decode(value,{stream:true}); const parts=pending.split(/\r?\n/); pending=parts.pop()||""; parts.forEach(handleLine);
+            }
+          } finally { state.reader.releaseLock(); state.reader=null; }
         }
-    } catch(e) { console.error(e); }
-});
-
-function parseLine(line) {
-    if (!line) return;
-    console.log("RX: " + line); // Print all incoming data to dev console
-
-    // Radar targets: T1: x=123mm y=456mm spd=12cm/s res=50mm VALID
-    // Works for both Ranger 2 (radarSerialDebug) and Ranger 3 (FusionNode)
-    const tm = line.match(/T(\d+):\s*x=(-?\d+)mm\s*y=(-?\d+)mm\s*spd=(-?\d+)cm\/s.*?(VALID|INVALID|---)/);
-    if (tm) {
-        if (tm[5] === 'VALID') {
-            targets[tm[1]] = {
-                x: parseInt(tm[2]), y: parseInt(tm[3]),
-                speed: parseInt(tm[4]), lastSeen: Date.now()
-            };
-        }
-        return;
+      } catch(err) { if(state.reading) addLog(`Serial read stopped: ${err.message}`,"badline"); }
+      if(state.port) await disconnectSerial();
+    }
+    async function disconnectSerial() {
+      state.reading=false;
+      if(state.reader){try{await state.reader.cancel();}catch(_){}}
+      if(state.port){try{await state.port.close();}catch(_){}}
+      state.reader=null;state.port=null;$("connectBtn").textContent="Connect serial";$("connectBtn").classList.add("primary");
+      $("serialState").textContent="Serial offline";setPill("serialPill","");if(state.source==="serial")setSource("none");addLog("Serial closed","system");
     }
 
-    // Ranger 2 IMU (legacy): IMU: ax=0.12 ay=-0.03 az=1.01 gx=1.2 gy=-0.5 gz=0.3 fall=0 impact=0.0
-    const imuR2 = line.match(/IMU:\s*ax=(-?[\d.]+)\s*ay=(-?[\d.]+)\s*az=(-?[\d.]+)\s*gx=(-?[\d.]+)\s*gy=(-?[\d.]+)\s*gz=(-?[\d.]+)/);
-    if (imuR2) {
-        imu.ax = parseFloat(imuR2[1]);
-        imu.ay = parseFloat(imuR2[2]);
-        imu.az = parseFloat(imuR2[3]);
-        imu.gx = parseFloat(imuR2[4]);
-        imu.gy = parseFloat(imuR2[5]);
-        imu.gz = parseFloat(imuR2[6]);
-        wearLink = true;
-        return;
+    function startDemo() {
+      if(state.demoTimer){stopDemo();return;} if(state.port)disconnectSerial();setSource("demo");$("demoBtn").textContent="Stop demo";$("demoBtn").classList.add("active");
+      addLog("Demo uses the same parser and rendering path as live serial.","system"); let tick=0;
+      state.demoTimer=setInterval(()=>{
+        tick++;const a=tick/15;
+        const rows=[
+          `T1: x=${Math.round(Math.sin(a)*1550)}mm y=${Math.round(2500+Math.cos(a*.7)*900)}mm spd=${Math.round(Math.cos(a)*38)}cm/s res=50mm VALID`,
+          `T2: x=${Math.round(Math.cos(a*.55)*2300)}mm y=${Math.round(4800+Math.sin(a*.4)*700)}mm spd=${Math.round(-Math.sin(a*.55)*23)}cm/s res=60mm VALID`,
+          `TELEMETRY: ax=${(.05*Math.sin(a)).toFixed(3)} ay=${(.08*Math.cos(a*.8)).toFixed(3)} az=${(1+.05*Math.sin(a*.4)).toFixed(3)} gx=${(6*Math.sin(a)).toFixed(1)} gy=${(4*Math.cos(a)).toFixed(1)} gz=0.8 mlFall=${Math.round(12+10*Math.max(0,Math.sin(a*.3)))} fusion=${(18+12*Math.max(0,Math.sin(a*.25))).toFixed(1)}`
+        ];rows.forEach(handleLine);if(tick%8===0)handleLine("STAT,W_OK");if(tick%16===0)handleLine(`RX> E,101325,52341,61234,${82-(tick%20)},0,${tick}`);
+      },100);
+    }
+    function stopDemo(){if(!state.demoTimer)return;clearInterval(state.demoTimer);state.demoTimer=null;$("demoBtn").textContent="Start demo";$("demoBtn").classList.remove("active");if(state.source==="demo")setSource("none");addLog("Demo stopped","system");}
+    async function toggleCamera(){
+      if(state.cameraStream){state.cameraStream.getTracks().forEach(t=>t.stop());state.cameraStream=null;$("camera").srcObject=null;$("camera").style.display="none";$("cameraBtn").classList.remove("active");return;}
+      try{state.cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false});$("camera").srcObject=state.cameraStream;$("camera").style.display="block";await $("camera").play();$("cameraBtn").classList.add("active");}
+      catch(err){addLog(`Camera unavailable: ${err.message}`,"badline");toast("Camera permission was not granted");}
+    }
+    function clearData(){state.targets.clear();state.trails.clear();state.lastRadar=0;state.csv=[];toast("Radar history cleared");}
+    function saveCsv(){
+      if(!state.csv.length){toast("Nothing recorded yet");return;}
+      const keys=[...new Set(state.csv.flatMap(Object.keys))], esc=(v)=>`"${String(v??"").replaceAll('"','""')}"`;
+      const csv=[keys.join(","),...state.csv.map(row=>keys.map(k=>esc(row[k])).join(","))].join("\n");
+      const blob=new Blob([csv],{type:"text/csv"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`ranger-radar-${new Date().toISOString().replace(/[:.]/g,"-")}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),5000);toast(`Saved ${state.csv.length} rows`);
     }
 
-    // Ranger 2 TELEMETRY (new): TELEMETRY: ax=0.12 ay=-0.03 az=1.01 gx=1.2 gy=-0.5 gz=0.3 mlFall=99 mlConf=99 fusion=0.85 radar=0.50
-    const telem = line.match(/TELEMETRY:\s*ax=(-?[\d.]+)\s*ay=(-?[\d.]+)\s*az=(-?[\d.]+)\s*gx=(-?[\d.]+)\s*gy=(-?[\d.]+)\s*gz=(-?[\d.]+)\s*mlFall=(\d+)\s*mlConf=(\d+)\s*fusion=([\d.]+)\s*radar=([\d.]+)/);
-    if (telem) {
-        imu.ax = parseFloat(telem[1]);
-        imu.ay = parseFloat(telem[2]);
-        imu.az = parseFloat(telem[3]);
-        imu.gx = parseFloat(telem[4]);
-        imu.gy = parseFloat(telem[5]);
-        imu.gz = parseFloat(telem[6]);
-        imu.mlFall = parseInt(telem[7]);
-        imu.mlConf = parseInt(telem[8]);
-        imu.fusion = parseFloat(telem[9]);
-        imu.radar = parseFloat(telem[10]);
-        wearLink = true;
-        return;
-    }
-
-    // Ranger 3 IMU: RX> I,ax,ay,az,gx,gy,gz,seq (raw int16 values)
-    if (line.startsWith('RX> I,')) {
-        const p = line.replace('RX> I,', '').split(',');
-        if (p.length >= 6) {
-            imu.ax = parseInt(p[0]) / 4096.0;
-            imu.ay = parseInt(p[1]) / 4096.0;
-            imu.az = parseInt(p[2]) / 4096.0;
-            imu.gx = parseInt(p[3]) / 65.5;
-            imu.gy = parseInt(p[4]) / 65.5;
-            imu.gz = parseInt(p[5]) / 65.5;
-        }
-        return;
-    }
-
-    // Ranger 3 ENV: RX> E,press,ir,red,bat,sos,seq
-    if (line.startsWith('RX> E,')) {
-        const p = line.replace('RX> E,', '').split(',');
-        if (p.length >= 5) {
-            battery = parseInt(p[3]);
-            sos = p[4] === '1';
-        }
-        return;
-    }
-
-    // Link status (Ranger 3)
-    if (line.includes('STAT,W_OK') || line.includes('STAT,BASE_LINK_OK')) wearLink = true;
-    if (line.includes('STAT,W_LOST') || line.includes('STAT,LINK_LOST')) wearLink = false;
-}
-</script>
+    $("connectBtn").addEventListener("click",connectSerial);$("demoBtn").addEventListener("click",startDemo);$("cameraBtn").addEventListener("click",toggleCamera);
+    $("pauseBtn").addEventListener("click",()=>{state.paused=!state.paused;$("pauseBtn").textContent=state.paused?"Resume":"Pause";$("pauseBtn").classList.toggle("active",state.paused);addLog(state.paused?"Input paused":"Input resumed","system");});
+    $("clearBtn").addEventListener("click",clearData);$("saveBtn").addEventListener("click",saveCsv);
+    $("consoleClearBtn").addEventListener("click",()=>{$("log").replaceChildren();state.logLines=[];});
+    $("copyBtn").addEventListener("click",async()=>{try{await navigator.clipboard.writeText(state.logLines.join("\n"));toast("Log copied");}catch(_){toast("Could not copy log");}});
+    $("range").addEventListener("change",()=>localStorage.setItem("ranger-range",$("range").value));
+    $("baud").addEventListener("change",()=>localStorage.setItem("ranger-baud",$("baud").value));
+    document.addEventListener("keydown",e=>{if(["SELECT","INPUT","BUTTON"].includes(document.activeElement.tagName))return;if(e.code==="Space"){e.preventDefault();$("pauseBtn").click();}else if(e.key.toLowerCase()==="c")$("connectBtn").click();else if(e.key.toLowerCase()==="d")$("demoBtn").click();else if(e.key.toLowerCase()==="x")$("clearBtn").click();});
+    navigator.serial?.addEventListener("disconnect",()=>{if(state.port)disconnectSerial();});
+    window.addEventListener("beforeunload",()=>{state.reading=false;if(state.cameraStream)state.cameraStream.getTracks().forEach(t=>t.stop());});
+    const savedRange=localStorage.getItem("ranger-range"),savedBaud=localStorage.getItem("ranger-baud");if(savedRange)$("range").value=savedRange;if(savedBaud)$("baud").value=savedBaud;
+    addLog("Viewer ready. Connect 115200-baud Ranger base output or start the demo.","system");updateReadouts();requestAnimationFrame(frame);
+  })();
+  </script>
 </body>
 </html>

@@ -1,164 +1,130 @@
-# RANGER Architecture & Protocol Specification
+# Current RANGER architecture
 
-This document details the system topology, inter-node communication protocols, packet byte layouts, and the multi-stage fall verification state machine.
+This document describes the protocol-v3 Pico/CrowPanel stack. Older sketches in `legacy_ranger2/`, `WatchNode_S3/` and `BathroomNode/` are retained for reference but are not part of this active data path.
 
----
+## Data flow
 
-## System Topology & Flow
-
-```mermaid
-flowchart TD
-    subgraph Wearables ["Ultra-Low-Power Wearables"]
-        WN["WearableNode<br/>(Seeed XIAO nRF52840 / nRF54L15)<br/>MPU6050/9250 + Edge Impulse ML"]
-        WNS3["WatchNode S3<br/>(ESP32-S3 SuperMini)<br/>MPU9250 + Mag + Baro"]
-    end
-
-    subgraph Stationary ["Stationary Zone Monitors"]
-        BN_RADAR["BathroomNode<br/>(ESP32-S3 + LD1125H)<br/>24GHz Zone Radar"]
-    end
-
-    subgraph Base_Processing ["Sensor Fusion & Bridge"]
-        BASE["BaseNode<br/>(Seeed XIAO nRF52840)<br/>BLE Central to UART Bridge"]
-        FUSION["FusionNode<br/>(Raspberry Pi Pico RP2040)<br/>Multi-Target Radar & Stillness FSM"]
-    end
-
-    subgraph Display_Emergency ["Tactical Dashboard & Emergency Node"]
-        CROW["CrowPanel Advance 4.3-inch<br/>(ESP32-S3 HMI Touchscreen)<br/>800x480 Tactical LovyanGFX"]
-        CAM["ESPCAM_Telegram<br/>(AI-Thinker ESP32-CAM)<br/>Optoisolated Relay Gated"]
-    end
-
-    WN -- "BLE Notifications (50Hz IMU / 10Hz Env / ML)" --> BASE
-    BASE -- "UART 115200 Baud (CSV Telemetry)" --> FUSION
-    FUSION -- "I2C Slave 0x42 (24-byte struct)" --> CROW
-    WNS3 -. "ESP-NOW Broadcast (10Hz)" .-> CROW
-    BN_RADAR -. "ESP-NOW Broadcast" .-> CROW
-    FUSION -- "GP16 Relay Gate (Active HIGH)" --> CAM
-    CROW -. "Wi-Fi HTTPS (Telegram Dispatch)" .-> CAM
+```text
+MPU6050 + Edge Impulse
+        |
+        v
+WearableNode 4.1 (XIAO nRF52840, BLE peripheral)
+        | fixed-size BLE notifications
+        v
+BaseNode 4.1 (XIAO nRF52840, BLE central)
+        | UART CSV at 115200 baud
+        v
+FusionNode 5.3 (RP2040) <--- RD-03D UART at 256000 baud
+        | I2C slave 0x42, Ranger Link v3
+        v
+CrowPanel 5.8 (ESP32-S3, I2C master and 800x480 UI)
 ```
 
----
+Fusion can also operate an optoisolated camera-power relay, DFPlayer Mini, passive/active buzzer and RGB status LED.
 
-## Communication Protocols
+## Responsibilities
 
-### 1. BLE Characteristic Specification (WearableNode &rarr; BaseNode)
+### WearableNode
 
-- **Service UUID:** `833d1814-9988-4e31-8db2-2c67699cd1c1`
+- Samples six-axis MPU6050 motion data.
+- Runs the deployed four-class Edge Impulse model locally.
+- Publishes IMU, environment and ML result packets over BLE.
+- Validates sensor initialization and rejects failed reads.
+- Uses overlapping inference windows to avoid blind boundaries between consecutive windows.
 
-#### IMU Characteristic (`...2a01`) — 20 Bytes @ 50 Hz
+### BaseNode
 
-| Byte Range | Field | Data Type | Scaling / Representation |
-|---|---|---|---|
-| `[0..5]` | Accelerometer ($a_x, a_y, a_z$) | `int16_t` (Big-Endian) | Divide by $4096 \text{ LSB/g}$ |
-| `[6..11]` | Gyroscope ($g_x, g_y, g_z$) | `int16_t` (Big-Endian) | Divide by $65.5 \text{ LSB/dps}$ |
-| `[12..17]` | Magnetometer ($m_x, m_y, m_z$) | `int16_t` (Big-Endian) | Raw magnetic flux density |
-| `[18..19]` | Sequence Counter | `uint16_t` (Big-Endian) | Monotonically increasing packet ID |
+- Scans for and connects to the wearable.
+- Requires exact BLE characteristic lengths.
+- Decodes multi-byte fields explicitly rather than relying on host alignment.
+- Tracks malformed traffic and accepts any valid packet as link recovery.
+- Converts BLE packets into readable UART records.
 
-#### Environmental Characteristic (`...2a02`) — 15 Bytes @ 10 Hz
+### FusionNode
 
-| Byte Range | Field | Data Type | Scaling / Description |
-|---|---|---|---|
-| `[0..3]` | Barometric Pressure | `int32_t` (Big-Endian) | Pressure in Pascals ($\text{Pa}$) |
-| `[4..7]` | Photoplethysmography IR | `uint32_t` (Big-Endian) | MAX30102 Infrared ADC Count |
-| `[8..11]` | Photoplethysmography Red | `uint32_t` (Big-Endian) | MAX30102 Red ADC Count |
-| `[12]` | Status Byte | `uint8_t` | Bit 7: SOS state (`1`=Active), Bits 0..6: Battery % (`0..100`) |
-| `[13..14]` | Sequence Counter | `uint16_t` (Big-Endian) | Monotonically increasing packet ID |
+- Parses Base UART messages and RD-03D binary frames.
+- Enforces ML class, confidence and false-alarm-margin policy.
+- Optionally enables raw-impact triggering.
+- Optionally requires continuous post-event stillness.
+- Latches confirmed alarms until an explicit validated cancel command.
+- Publishes immutable, double-buffered I2C snapshots.
+- Controls relay, RGB LED, buzzer and queued DFPlayer audio without blocking sensor processing.
 
-#### Machine Learning Classifier Characteristic (`...2a04`) — 8 Bytes
+### CrowPanel
 
-| Byte Index | Field | Range / Description |
-|---|---|---|
-| `[0]` | Fall Score | `0 – 100%` Confidence |
-| `[1]` | False Alarm Score | `0 – 100%` Confidence |
-| `[2]` | Idle Score | `0 – 100%` Confidence |
-| `[3]` | Walking Score | `0 – 100%` Confidence |
-| `[4]` | Winner Class Index | `0`: Fall, `1`: False Alarm, `2`: Idle, `3`: Walking |
-| `[5]` | Prediction Confidence | Overall model certainty percentage |
-| `[6]` | Status Flags | Bit 0 = SOS State |
-| `[7]` | Sequence Counter | Monotonic sequence byte |
+- Polls Fusion at a bounded rate and verifies magic, protocol version and CRC-8.
+- Detects stale packets, frozen sequence numbers and sequence gaps.
+- Provides saved impact/stillness settings and re-synchronizes them after link acquisition.
+- Draws runtime pages directly with bounded dirty regions.
+- Keeps Wi-Fi off during ordinary monitoring.
+- Uses Wi-Fi only for an optional emergency Telegram request, then turns it off.
 
----
+The CrowPanel is a presentation/control layer. It is not the source of the wearable ML decision.
 
-### 2. BaseNode &rarr; FusionNode UART Frame Format (115200 Baud)
+## Fall state machine
 
-The BaseNode decodes incoming BLE packets and forwards ASCII CSV telemetry strings over Hardware UART (`Serial1`):
+```text
+NORMAL
+  |
+  | qualified ML result
+  | or optional impact trigger
+  v
+CANDIDATE
+  |-- stillness disabled ---------------------> CONFIRMED
+  |-- stillness sustained for required time --> CONFIRMED
+  `-- motion / timeout / settings change ------> NORMAL
 
-- **Kinematics Line:** `I,<ax>,<ay>,<az>,<gx>,<gy>,<gz>,<seq>\n`
-- **Environmental Line:** `E,<pressure_pa>,<ir>,<red>,<battery>,<sos>,<seq>\n`
-- **Machine Learning Line:** `M,<fall%>,<false_alarm%>,<idle%>,<walk%>,<winner_idx>,<confidence%>,<flags>\n`
-- **System Status Events:** `STAT,BASE_BOOT`, `STAT,BASE_LINK_OK`, `STAT,W_OK`, `STAT,W_LOST`, `STAT,LINK_LOST`
-
----
-
-### 3. FusionNode &rarr; CrowPanel I2C Slave Specification (Address 0x42)
-
-The Fusion Node acts as an I2C slave responder (`Wire1`, address `0x42`), returning a packed **24-byte telemetry structure** with a 1-byte XOR checksum on every read request from the CrowPanel master.
-
-```cpp
-struct TelemetryPacket {
-    uint8_t  magic;         // 0xAA preamble
-    int16_t  ax, ay, az;    // Raw acceleration (divide by 4096 -> g)
-    int16_t  gx, gy, gz;    // Raw angular velocity (divide by 65.5 -> dps)
-    uint8_t  battery;       // 0–100%
-    uint8_t  sos;           // 0 or 1
-    uint8_t  fallState;     // 0 = Normal, 1 = Verifying, 2 = Confirmed Fall
-    uint8_t  wearLink;      // 0 = Offline, 1 = Connected
-    uint8_t  radarPresent;  // 0 = Clear, 1 = Target Tracked
-    int16_t  radarDist_mm;  // Target Distance in millimeters
-    int16_t  radarSpeed;    // Target Velocity in cm/s
-    uint8_t  radarTargets;  // Active Target Count (0–3)
-    uint8_t  checksum;      // XOR checksum of bytes 0..22
-};
+CONFIRMED
+  | alarm outputs and relay active
+  `-- validated cancel command ---------------> NORMAL
 ```
 
----
+The ML result must reach the configured threshold, win over the other model classes, and lead the false-alarm score by the configured margin. With stillness enabled, a stale IMU stream cannot confirm a candidate.
 
-### 4. RD-03D 24GHz mmWave Radar Interface (256000 Baud)
+Radar data is reported for presence, target count, range and radial speed. It is not a mandatory fall-confirmation input in this version.
 
-- **Frame Header:** `0xAA 0xFF 0x03 0x00`
-- **Frame Footer:** `0x55 0xCC`
-- **Target Payload Block:** 8 bytes per target (supports up to 3 simultaneous targets):
-  - Bytes `0..1`: X position (sign-magnitude mm)
-  - Bytes `2..3`: Y position (sign-magnitude mm)
-  - Bytes `4..5`: Radial speed (sign-magnitude cm/s)
-  - Bytes `6..7`: Spatial resolution (mm)
+## Ranger Link v3
 
-**Sign-Magnitude Value Decoding:**
-```cpp
-int16_t val = ((high & 0x7F) << 8) | low;
-if ((high & 0x80) == 0) {
-    val = -val;
-}
-```
+Ranger Link uses a packed 32-byte telemetry packet and a packed 5-byte command packet. Both protocol headers contain compile-time size assertions.
 
----
+Telemetry includes:
 
-## Fall Verification State Machine
+- protocol magic and version;
+- sequence number;
+- acceleration and gyro data;
+- fall state and wearable/radar/relay/SOS flags;
+- battery percentage;
+- ML fall and confidence values;
+- radar range, speed and target count;
+- configuration state; and
+- CRC-8.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Monitor : Power On / Reset
+The sequence number differentiates a healthy stream from a peripheral that repeatedly returns an old but otherwise valid packet.
 
-    state Monitor {
-        [*] --> ContinuousKinematics
-        ContinuousKinematics : 50Hz Real-Time IMU Stream
-        ContinuousKinematics : On-Device ML Classifier Inference
-    }
+Commands include alarm cancellation, relay testing, impact-trigger configuration and stillness configuration. Every command is validated before it is queued for normal-loop processing. I2C interrupt callbacks only copy prepared bytes or queue flags; they do not perform logging, timing decisions or actuator work.
 
-    Monitor --> CheckStillness : Impact > 2.5g OR ML Fall Score > 85%
+## Timing
 
-    state CheckStillness {
-        [*] --> WindowEvaluation
-        WindowEvaluation : 3-Second Window (25 samples)
-        WindowEvaluation : Measure Stillness (|a| - 1.0g < 0.25g)
-    }
+| Operation | Nominal period |
+| --- | --- |
+| Fusion telemetry publication | 100 ms |
+| CrowPanel Pico poll | 250 ms |
+| CrowPanel dashboard refresh | 1 s |
+| Motion graph transfer | 2 s |
+| Touch poll | 25 ms |
+| Link stale threshold | 1.5 s |
 
-    CheckStillness --> Monitor : Movement Detected (Self-Recovery / False Alarm)
-    CheckStillness --> ConfirmedFall : Continuous Stillness Confirmed
+These rates intentionally separate communication from display rendering. The RGB panel scans a framebuffer in external memory, so repeated full-screen sprite transfers and continuous Wi-Fi activity are avoided.
 
-    state ConfirmedFall {
-        [*] --> EmergencyResponse
-        EmergencyResponse : Energize GP16 Optocoupler Relay (Power ESP32-CAM)
-        EmergencyResponse : Trigger CrowPanel Tactical Audio-Visual Alarm
-        EmergencyResponse : Dispatch Telegram Bot Alert with Multi-Frame Snapshots
-    }
-```
+## Failure handling
+
+- Missing wearable: Base continues scanning; Fusion and CrowPanel expose link loss.
+- Stale/frozen Pico telemetry: CrowPanel reports the link fault rather than displaying the packet as live.
+- Invalid CRC/version/size: the packet is rejected.
+- Missing radar: wearable ML remains available.
+- Missing CrowPanel: Fusion continues processing its sensor inputs and local outputs.
+- Configuration change during a candidate: Fusion rejects the in-progress candidate so its rules cannot change halfway through an event.
+
+## Security and privacy boundary
+
+Fall inference is local. The only optional internet path is the CrowPanel emergency Telegram request. Wi-Fi and Telegram values live in an ignored `secrets.h`; only `secrets.example.h` belongs in version control.

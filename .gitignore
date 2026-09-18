@@ -4,6 +4,8 @@ bin/
 *.bin
 *.elf
 *.hex
+*.uf2
+*.zip
 *.o
 *.d
 *.a
@@ -33,3 +35,15 @@ finalbaby/
 portfolio/
 solaris final/
 STM32Benchmark/
+
+# Local credentials and private development material
+secrets.h
+**/secrets.h
+*.pem
+*.key
+.env
+.env.*
+RANGER_*_BACKUP*/
+RANGER_*_LOCKED*/
+RANGER_*_SANDBOX*/
+HANDOFF*.md
